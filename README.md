@@ -167,6 +167,7 @@ Gate Status: ❌ FAILED
 │       └── pr-comment-template.md      # PR 댓글 템플릿
 │
 └── docs/
+    ├── project.md                 # 프로젝트 가이드
     ├── pipeline-guide.md          # 파이프라인 운영 가이드
     ├── team-interface.md          # 팀 연동 인터페이스 및 협업 프로세스
     └── tasks/
