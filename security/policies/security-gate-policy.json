@@ -1,0 +1,6 @@
+{
+  "blockOnCritical": true,
+  "blockOnHigh": true,
+  "blockOnSecret": true,
+  "warnOnMedium": true
+}
