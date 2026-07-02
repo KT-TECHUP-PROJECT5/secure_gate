@@ -106,15 +106,15 @@ steps:
 
 | 항목                           | 내용                                      | 상태       |
 | ------------------------------ | ----------------------------------------- | ---------- |
-| Semgrep 실행 명령어            |                                           | 미확정     |
-| Semgrep 설정 파일 경로         |                                           | 미확정     |
-| SAST 결과 파일 경로            | `security/reports/sast-report.json`       | A파트 고정 |
+| Semgrep 실행 명령어            | `semgrep scan --config auto . --json --output security/reports/sast-report.json` | 확정       |
+| Semgrep 설정 파일 경로         | 별도 파일 없음 (`--config auto`)                                                | 초기 확정  |
+| SAST 결과 파일 경로            | `security/reports/sast-report.json`                                             | A파트 고정 |
 | Gitleaks 실행 명령어           |                                           | 미확정     |
 | Secret Scan 결과 파일 경로     | `security/reports/secret-report.json`     | A파트 고정 |
 | Trivy 실행 명령어              |                                           | 미확정     |
 | Dependency Scan 결과 파일 경로 | `security/reports/dependency-report.json` | A파트 고정 |
-| 각 도구의 실패 기준            |                                           | 미확정     |
-| 출력 형식                      | JSON (공통 스키마 준수)                   | A파트 고정 |
+| 각 도구의 실패 기준            | 결과 파일 미생성 또는 유효하지 않은 JSON | 초기 확정  |
+| 출력 형식                      | 도구별 원본 JSON                         | 확정       |
 
 ---
 

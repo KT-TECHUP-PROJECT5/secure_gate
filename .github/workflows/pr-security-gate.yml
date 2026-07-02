@@ -41,7 +41,7 @@ jobs:
           path: security/reports/build-report.json
 
   # ──────────────────────────────────────────
-  # 2. SAST (Semgrep) - C파트 연결 예정
+  # 2. SAST (Semgrep) - C파트
   # ──────────────────────────────────────────
   sast:
     name: SAST (Semgrep)
@@ -49,19 +49,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: "[Placeholder] SAST Scan"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Semgrep
+        run: python -m pip install semgrep==1.168.0
+
+      - name: Run Semgrep
+        id: semgrep-scan
+        continue-on-error: true
         run: |
-          echo "SAST placeholder - C파트의 Semgrep 명령어로 교체 예정"
           mkdir -p security/reports
-          cat > security/reports/sast-report.json <<'EOF'
-          {
-            "status": "passed",
-            "tool": "semgrep",
-            "findings": []
-          }
-          EOF
+          semgrep scan --config auto . \
+            --json \
+            --output security/reports/sast-report.json
+
+      - name: Validate Semgrep report
+        run: |
+          python -c 'import json; data=json.load(open("security/reports/sast-report.json")); assert isinstance(data.get("results"), list); assert isinstance(data.get("errors"), list)'
 
       - name: Upload SAST report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sast-report
