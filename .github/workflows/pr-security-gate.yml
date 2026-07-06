@@ -62,7 +62,9 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p security/reports
-          semgrep scan --config auto . \
+          semgrep scan \
+            --config auto \
+            --config r/python.flask.security.xss.audit.template-unescaped-with-safe.template-unescaped-with-safe . \
             --json \
             --output security/reports/sast-report.json
 
