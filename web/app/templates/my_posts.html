@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}내 게시글 · 모아{% endblock %}
+{% block content %}
+<div class="page-heading row-heading">
+    <div>
+        <span class="eyebrow">MY SPACE</span>
+        <h1>내 게시글</h1>
+        <p>내가 작성한 공개 글과 비공개 글을 모아볼 수 있습니다.</p>
+    </div>
+    <a class="button" href="/posts/new">새 글 작성</a>
+</div>
+<section class="panel">
+    <div class="post-list">
+        {% for post in posts %}
+        <a class="post-row" href="{% if post.is_private %}/posts/private/{{ post.id }}{% else %}/posts/{{ post.id }}{% endif %}">
+            <span class="visibility-badge {% if post.is_private %}private{% endif %}">{% if post.is_private %}비공개{% else %}공개{% endif %}</span>
+            <span class="post-main">
+                <strong>{{ post.title }}</strong>
+                <small>{{ post.created_at.strftime('%Y.%m.%d %H:%M') }}</small>
+            </span>
+            <span class="row-arrow">→</span>
+        </a>
+        {% else %}
+        <div class="empty-state"><strong>작성한 글이 없습니다.</strong></div>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

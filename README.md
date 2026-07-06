@@ -157,21 +157,27 @@ Gate Status: ❌ FAILED
 ├── scripts/
 │   ├── aggregate-results.py       # 보안 검사 결과 통합
 │   ├── evaluate-gate.py           # 정책 기반 Gate 판단
-│   └── create-pr-comment.py       # PR 댓글 자동 작성
+│   ├── create-pr-comment.py       # PR 댓글 자동 작성
+│   └── run-redteam-poc.sh         # B 파트 로컬 PoC
 │
 ├── security/
+│   ├── baselines/
+│   │   └── redteam-expected-findings.json
 │   ├── policies/
 │   │   └── security-gate-policy.json  # Merge 차단 정책
 │   ├── reports/                        # 보안 검사 결과 저장
 │   └── templates/
 │       └── pr-comment-template.md      # PR 댓글 템플릿
 │
+├── web/                             # FastAPI 교육용 취약 앱
 └── docs/
     ├── project.md                 # 프로젝트 가이드
     ├── pipeline-guide.md          # 파이프라인 운영 가이드
     ├── team-interface.md          # 팀 연동 인터페이스 및 협업 프로세스
+    ├── red-team/                  # B 파트 PoC·탐지 기준
     └── tasks/
-        └── A-part-task.md         # 작업 체크리스트
+        ├── A-part-task.md
+        └── B-part-task.md
 ```
 
 ---
