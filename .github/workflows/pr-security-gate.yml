@@ -80,27 +80,44 @@ jobs:
           path: security/reports/sast-report.json
 
   # ──────────────────────────────────────────
-  # 3. Secret Scan (Gitleaks) - C파트 연결 예정
+  # 3. Secret Scan (Gitleaks) - C파트
   # ──────────────────────────────────────────
   secret-scan:
     name: Secret Scan (Gitleaks)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: "[Placeholder] Secret Scan"
+      - name: Install Gitleaks
         run: |
-          echo "Secret Scan placeholder - C파트의 Gitleaks 명령어로 교체 예정"
+          GITLEAKS_VERSION="8.30.1"
+          curl --fail --silent --show-error --location \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            --output /tmp/gitleaks.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz" | sha256sum --check
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo install /tmp/gitleaks /usr/local/bin/gitleaks
+
+      - name: Run Gitleaks
+        id: gitleaks-scan
+        continue-on-error: true
+        run: |
           mkdir -p security/reports
-          cat > security/reports/secret-report.json <<'EOF'
-          {
-            "status": "passed",
-            "tool": "gitleaks",
-            "findings": []
-          }
-          EOF
+          gitleaks git . \
+            --report-format json \
+            --report-path security/reports/secret-report.json \
+            --redact=100 \
+            --exit-code 0 \
+            --no-banner
+
+      - name: Validate Gitleaks report
+        run: |
+          python3 -c 'import json; data=json.load(open("security/reports/secret-report.json")); assert isinstance(data, list)'
 
       - name: Upload secret scan report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: secret-report

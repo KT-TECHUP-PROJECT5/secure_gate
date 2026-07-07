@@ -109,7 +109,7 @@ steps:
 | Semgrep 실행 명령어            | `semgrep scan --config auto . --json --output security/reports/sast-report.json` | 확정       |
 | Semgrep 설정 파일 경로         | 별도 파일 없음 (`--config auto`)                                                | 초기 확정  |
 | SAST 결과 파일 경로            | `security/reports/sast-report.json`                                             | A파트 고정 |
-| Gitleaks 실행 명령어           |                                           | 미확정     |
+| Gitleaks 실행 명령어           | `gitleaks git . --report-format json --report-path security/reports/secret-report.json --redact=100 --exit-code 0 --no-banner` | 확정       |
 | Secret Scan 결과 파일 경로     | `security/reports/secret-report.json`     | A파트 고정 |
 | Trivy 실행 명령어              |                                           | 미확정     |
 | Dependency Scan 결과 파일 경로 | `security/reports/dependency-report.json` | A파트 고정 |
