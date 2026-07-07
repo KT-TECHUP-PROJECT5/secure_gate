@@ -124,7 +124,7 @@ jobs:
           path: security/reports/secret-report.json
 
   # ──────────────────────────────────────────
-  # 4. Dependency Scan (Trivy) - C파트 연결 예정
+  # 4. Dependency Scan (Trivy) - C파트
   # ──────────────────────────────────────────
   dependency-scan:
     name: Dependency Scan (Trivy)
@@ -132,19 +132,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: "[Placeholder] Dependency Scan"
+      - name: Install Trivy
         run: |
-          echo "Dependency Scan placeholder - C파트의 Trivy 명령어로 교체 예정"
+          TRIVY_VERSION="0.70.0"
+          curl --fail --silent --show-error --location \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
+            --output /tmp/trivy.tar.gz
+          echo "8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9  /tmp/trivy.tar.gz" | sha256sum --check
+          tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
+          sudo install /tmp/trivy /usr/local/bin/trivy
+
+      - name: Run Trivy
+        id: trivy-scan
+        continue-on-error: true
+        run: |
           mkdir -p security/reports
-          cat > security/reports/dependency-report.json <<'EOF'
-          {
-            "status": "passed",
-            "tool": "trivy",
-            "findings": []
-          }
-          EOF
+          trivy fs \
+            --scanners vuln \
+            --file-patterns "pip:requirements-legacy.txt" \
+            --format json \
+            --output security/reports/dependency-report.json \
+            --exit-code 0 \
+            --no-progress \
+            .
+
+      - name: Validate Trivy report
+        run: |
+          python3 -c 'import json; data=json.load(open("security/reports/dependency-report.json")); assert isinstance(data, dict); assert data.get("SchemaVersion") == 2'
 
       - name: Upload dependency scan report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: dependency-report

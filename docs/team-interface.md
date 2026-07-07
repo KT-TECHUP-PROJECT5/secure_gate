@@ -111,7 +111,7 @@ steps:
 | SAST 결과 파일 경로            | `security/reports/sast-report.json`                                             | A파트 고정 |
 | Gitleaks 실행 명령어           | `gitleaks git . --report-format json --report-path security/reports/secret-report.json --redact=100 --exit-code 0 --no-banner` | 확정       |
 | Secret Scan 결과 파일 경로     | `security/reports/secret-report.json`     | A파트 고정 |
-| Trivy 실행 명령어              |                                           | 미확정     |
+| Trivy 실행 명령어              | `trivy fs --scanners vuln --file-patterns "pip:requirements-legacy.txt" --format json --output security/reports/dependency-report.json --exit-code 0 --no-progress .` | 확정       |
 | Dependency Scan 결과 파일 경로 | `security/reports/dependency-report.json` | A파트 고정 |
 | 각 도구의 실패 기준            | 결과 파일 미생성 또는 유효하지 않은 JSON | 초기 확정  |
 | 출력 형식                      | 도구별 원본 JSON                         | 확정       |
