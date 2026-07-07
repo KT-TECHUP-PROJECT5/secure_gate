@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+    <h2>Debug Information</h2>
+    <!-- 실습을 위해 예외 메시지와 내부 정보를 사용자에게 그대로 노출합니다. -->
+    <dl>
+        <dt><strong>Error Type</strong></dt>
+        <dd>{{ error_type }}</dd>
+        <dt><strong>Error Message</strong></dt>
+        <dd><pre>{{ error_message }}</pre></dd>
+        <dt><strong>Internal Hint</strong></dt>
+        <dd><code>{{ internal_hint }}</code></dd>
+    </dl>
+</div>
+{% endblock %}

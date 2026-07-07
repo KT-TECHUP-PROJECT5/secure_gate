@@ -94,11 +94,11 @@ steps:
 
 | 항목                                        | 내용 | 상태   |
 | ------------------------------------------- | ---- | ------ |
-| 취약점 포함 테스트 앱 브랜치 또는 코드 경로 |      | 미확정 |
-| 취약 API 목록                               |      | 미확정 |
-| 공격 PoC 목록 및 실행 방법                  |      | 미확정 |
-| 탐지되어야 하는 취약점 목록                 |      | 미확정 |
-| 정상 탐지 / 미탐 / 오탐 검증 기준           |      | 미확정 |
+| 취약점 포함 테스트 앱 브랜치 또는 코드 경로 | `feat/b-vulnerable-app`, `web/` | 확정 |
+| 취약 API 목록                               | `web/docs/api-list.txt` | 확정 |
+| 공격 PoC 목록 및 실행 방법                  | `docs/red-team/poc-guide.md`, `scripts/run-redteam-poc.sh` | 확정 |
+| 탐지되어야 하는 취약점 목록                 | `security/baselines/redteam-expected-findings.json` | 확정 |
+| 정상 탐지 / 미탐 / 오탐 검증 기준           | `docs/red-team/detection-baseline.md` | 확정 |
 
 ---
 

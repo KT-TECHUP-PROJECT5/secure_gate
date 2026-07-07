@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}활동 기록 · 모아{% endblock %}
+{% block content %}
+<div class="narrow-layout">
+    <a class="back-link" href="/admin">← 운영 관리로</a>
+    <section class="panel empty-log">
+        <span class="empty-icon">○</span>
+        <h1>활동 기록</h1>
+        {% if security_events %}
+        <ul>{% for event in security_events %}<li>{{ event }}</li>{% endfor %}</ul>
+        {% else %}
+        <p>현재 기록된 활동이 없습니다.</p>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}
