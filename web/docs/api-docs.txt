@@ -1,0 +1,119 @@
+1. Method / URL
+   - POST /login
+   - 설명: 사용자 인증을 수행합니다.
+   - 인증 필요 여부: No
+   - 요청 파라미터: username, password
+   - 응답 설명: 성공 시 세션 생성 후 /posts로 리다이렉트됩니다.
+   - 의도 취약점: 로그인 SQL Injection
+   - PoC 입력값: username=' OR '1'='1' --, password=anything
+   - 기대 결과: 정상 계정 없이 로그인에 성공합니다.
+
+2. Method / URL
+   - GET /posts?keyword=
+   - 설명: 제목/내용 기준으로 게시글을 검색합니다.
+   - 인증 필요 여부: No
+   - 요청 파라미터: keyword
+   - 응답 설명: 검색 결과를 게시글 목록에 표시합니다.
+   - 의도 취약점: 검색 SQL Injection, 검색어 Reflected XSS
+   - PoC 입력값: keyword=') OR '1'='1' -- / <script>alert('reflected-xss')</script>
+   - 기대 결과: SQL Injection 입력 시 조건 우회 또는 DB 오류가 노출되고, XSS 입력 시 alert가 실행됩니다.
+
+3. Method / URL
+   - GET /posts/{post_id}
+   - 설명: 게시글 상세 정보를 조회합니다.
+   - 인증 필요 여부: No
+   - 요청 파라미터: post_id
+   - 응답 설명: 제목, 내용, 작성자, 작성일, 댓글 목록을 출력합니다.
+   - 의도 취약점: 게시글 Stored XSS, 댓글 Stored XSS
+   - PoC 입력값: content=<script>alert('stored-xss')</script> / <script>alert('comment-xss')</script>
+   - 기대 결과: 상세 페이지에서 alert가 실행됩니다.
+
+4. Method / URL
+   - GET /posts/private/{post_id}
+   - 설명: 비공개 게시글을 조회합니다.
+   - 인증 필요 여부: Yes
+   - 요청 파라미터: post_id
+   - 응답 설명: 비공개 게시글 내용을 반환합니다.
+   - 의도 취약점: 비공개 게시글 IDOR
+   - PoC 입력값: user1 로그인 후 /posts/private/2 접근
+   - 기대 결과: 작성자가 아닌 사용자가 다른 사용자의 비공개 게시글을 조회할 수 있습니다.
+
+5. Method / URL
+   - GET /admin
+   - 설명: 관리자 페이지를 조회합니다.
+   - 인증 필요 여부: Yes
+   - 요청 파라미터: 없음
+   - 응답 설명: 사용자, 게시글, 댓글 목록을 출력합니다.
+   - 의도 취약점: 일반 사용자 관리자 페이지 접근, 게시글 삭제 권한 우회
+   - PoC 입력값: user1 로그인 후 /admin 접근
+   - 기대 결과: 일반 사용자도 관리자 페이지에 접근하고 타인 게시글을 삭제할 수 있습니다.
+
+6. Method / URL
+   - GET /upload
+   - 설명: 파일 업로드 폼과 업로드 기록을 표시합니다.
+   - 인증 필요 여부: Yes
+   - 요청 파라미터: 없음
+   - 응답 설명: 파일명, 업로더, 업로드 시각, 파일 크기 목록을 출력합니다.
+   - 의도 취약점: 위험 파일 업로드가 별도 보안 이벤트로 기록되지 않음
+   - PoC 입력값: user1 로그인 후 /upload 접근
+   - 기대 결과: 업로드 폼과 기존 업로드 목록이 표시됩니다.
+
+7. Method / URL
+   - POST /upload
+   - 설명: 선택한 파일을 서버의 app/uploads 디렉터리에 저장합니다.
+   - 인증 필요 여부: Yes
+   - 요청 파라미터: multipart/form-data file
+   - 응답 설명: UUID 기반 이름으로 저장하고 업로드 기록을 생성한 뒤 /upload로 이동합니다.
+   - 의도 취약점: 파일 확장자 제한 없음, MIME Type 검증 없음, 파일 크기 제한 없음
+   - PoC 입력값: test.html, test.svg, test.php, test.js, test.txt
+   - 기대 결과: 모든 확장자의 파일이 제한 없이 업로드됩니다.
+
+8. Method / URL
+   - GET /download/{upload_id}
+   - 설명: 업로드 기록에 연결된 파일을 첨부 파일로 내려받습니다.
+   - 인증 필요 여부: No
+   - 요청 파라미터: upload_id
+   - 응답 설명: 원본 파일명을 사용한 다운로드 응답을 반환합니다.
+   - 의도 취약점: 다운로드 소유권 검사 없음
+   - PoC 입력값: /download/1
+   - 기대 결과: 해당 ID의 업로드 파일을 다운로드할 수 있습니다.
+
+9. Method / URL
+   - GET /admin/security-events
+   - 설명: 보안 이벤트 목록 화면을 표시합니다.
+   - 인증 필요 여부: Yes (role 검증 누락)
+   - 요청 파라미터: 없음
+   - 응답 설명: 하드코딩된 빈 보안 이벤트 목록을 출력합니다.
+   - 의도 취약점: 공격 시도 로그 및 알림 미구현
+   - PoC 입력값: SQLi, XSS, 일반 사용자 관리자 접근, test.php 업로드 후 페이지 확인
+   - 기대 결과: 여러 공격 후에도 “현재 기록된 보안 이벤트가 없습니다.”가 표시됩니다.
+
+10. Method / URL
+    - GET /debug/error
+    - 설명: 일반 예외를 발생시킨 뒤 상세 메시지를 화면에 표시합니다.
+    - 인증 필요 여부: No
+    - 요청 파라미터: 없음
+    - 응답 설명: 예외 타입, 메시지, 내부 힌트를 출력합니다.
+    - 의도 취약점: 예외 메시지 노출
+    - PoC 입력값: /debug/error 접근
+    - 기대 결과: Intentional debug error 메시지가 노출됩니다.
+
+11. Method / URL
+    - GET /debug/db-error
+    - 설명: 존재하지 않는 테이블을 조회해 DB 오류를 발생시킵니다.
+    - 인증 필요 여부: No
+    - 요청 파라미터: 없음
+    - 응답 설명: SQLAlchemy/DB 오류 내용을 화면에 출력합니다.
+    - 의도 취약점: DB 에러 메시지 노출
+    - PoC 입력값: /debug/db-error 접근
+    - 기대 결과: not_existing_table 및 SQL 문장이 포함된 오류가 노출됩니다.
+
+12. Method / URL
+    - GET /debug/path-error
+    - 설명: 내부 파일 경로처럼 보이는 정보를 오류 화면에 표시합니다.
+    - 인증 필요 여부: No
+    - 요청 파라미터: 없음
+    - 응답 설명: 오류 타입, 메시지, 내부 경로 힌트를 출력합니다.
+    - 의도 취약점: 내부 경로 노출
+    - PoC 입력값: /debug/path-error 접근
+    - 기대 결과: /app/routers/errors.py 경로 정보가 노출됩니다.
