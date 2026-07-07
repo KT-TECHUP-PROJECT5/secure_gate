@@ -1,0 +1,83 @@
+{
+  "status": "failed",
+  "tool": "redteam-baseline",
+  "findings": [
+    {
+      "id": "B-01",
+      "severity": "critical",
+      "title": "Login SQL Injection",
+      "description": "Raw SQL login query allows authentication bypass.",
+      "location": "web/app/routers/auth.py"
+    },
+    {
+      "id": "B-02",
+      "severity": "high",
+      "title": "Search SQL Injection",
+      "description": "Search input is concatenated into a raw SQL query.",
+      "location": "web/app/routers/posts.py"
+    },
+    {
+      "id": "B-03",
+      "severity": "high",
+      "title": "Stored and Reflected XSS",
+      "description": "Untrusted post, comment, and search values are rendered with escaping disabled.",
+      "location": "web/app/templates"
+    },
+    {
+      "id": "B-05",
+      "severity": "high",
+      "title": "Private Post IDOR",
+      "description": "A logged-in user can read another user's private post by changing the ID.",
+      "location": "GET /posts/private/{post_id}"
+    },
+    {
+      "id": "B-06",
+      "severity": "high",
+      "title": "Missing Admin Role Check",
+      "description": "Any authenticated user can access administrator pages.",
+      "location": "GET /admin"
+    },
+    {
+      "id": "B-07",
+      "severity": "high",
+      "title": "Unauthorized Post Deletion",
+      "description": "Any authenticated user can delete another user's post.",
+      "location": "POST /posts/{post_id}/delete"
+    },
+    {
+      "id": "B-08",
+      "severity": "high",
+      "title": "Unrestricted File Upload",
+      "description": "Extension, MIME type, and file size validation are missing.",
+      "location": "POST /upload"
+    },
+    {
+      "id": "B-09",
+      "severity": "medium",
+      "title": "Authentication Failure Controls Missing",
+      "description": "Weak passwords, unlimited retries, and no account lockout are allowed.",
+      "location": "web/app/routers/auth.py"
+    },
+    {
+      "id": "B-10",
+      "severity": "medium",
+      "title": "Security Events Not Recorded",
+      "description": "Attack attempts do not produce security events or alerts.",
+      "location": "GET /admin/security-events"
+    },
+    {
+      "id": "B-11",
+      "severity": "medium",
+      "title": "Detailed Error Information Exposure",
+      "description": "Exception, SQL, and internal path details are returned to users.",
+      "location": "GET /debug/*"
+    },
+    {
+      "id": "B-12",
+      "severity": "medium",
+      "title": "Security Headers Missing",
+      "description": "CSP, X-Frame-Options, and X-Content-Type-Options are not configured.",
+      "location": "http://127.0.0.1:8000"
+    }
+  ]
+}
