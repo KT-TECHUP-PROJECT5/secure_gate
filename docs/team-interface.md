@@ -122,14 +122,15 @@ steps:
 
 | 항목                              | 내용                                   | 상태       |
 | --------------------------------- | -------------------------------------- | ---------- |
-| Staging 실행 방식                 |                                        | 미확정     |
-| Staging URL                       |                                        | 미확정     |
-| Health Check Endpoint             |                                        | 미확정     |
-| Smoke Test 실행 명령어            |                                        | 미확정     |
-| ZAP 실행 명령어                   |                                        | 미확정     |
+| Staging 실행 방식                 | CD Workflow의 `post-deploy-validation`에서 검증 | 연결 완료 |
+| Staging URL                       | `STAGING_URL` Repository Variable 사용 | 팀 확정 필요 |
+| ZAP 대상 URL                      | `ZAP_TARGET_URL` Repository Variable 사용. 미설정 시 `RUNTIME_BASE_URL`/`STAGING_URL` 사용 | 연결 완료 |
+| Health Check Endpoint             | `HEALTH_CHECK_PATH`, 기본 `/health`    | 연결 완료 |
+| Smoke Test 실행 명령어            | `python scripts/runtime-validation.py` / `SMOKE_TEST_PATHS` | 연결 완료 |
+| ZAP 실행 명령어                   | Workflow에서 `zap-baseline.py` 실행 후 `security/reports/zap-report.json` 저장 | 연결 완료 |
 | Runtime Validation 결과 파일 경로 | `security/reports/runtime-report.json` | A파트 고정 |
-| 보안 헤더 검증 기준               |                                        | 미확정     |
-| Runtime Validation 실패 기준      |                                        | 미확정     |
+| 보안 헤더 검증 기준               | `REQUIRED_SECURITY_HEADERS` 사용       | 연결 완료 |
+| Runtime Validation 실패 기준      | Health/Smoke 실패 High, Header 누락 Medium, ZAP riskcode 매핑 | 연결 완료 |
 
 ---
 

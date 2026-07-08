@@ -74,7 +74,7 @@ flowchart TD
 | Secret Scan | Gitleaks 기반 API Key, JWT Secret, DB Password 등 민감정보 탐지 |
 | Dependency Scan | Trivy 기반 의존성 및 CVE 검사 |
 | DAST | OWASP ZAP 기반 실행 중인 웹 애플리케이션 동적 분석 |
-| Runtime Validation | Health Check, Smoke Test, 보안 헤더(CSP/HSTS/X-Frame-Options) 검증 |
+| Runtime Validation | Health Check, Smoke Test, 보안 헤더(CSP/HSTS/X-Frame-Options) 검증, ZAP 결과 연동 |
 | Aggregator | 각 보안 도구의 결과 파일을 하나의 Summary로 통합 |
 | Policy Evaluator | 위험도 및 정책 기준으로 Merge/배포 가능 여부 판단 |
 | Merge 차단 | Critical/High 취약점 또는 Secret 탐지 시 PR 자동 차단 |
@@ -158,7 +158,9 @@ Gate Status: ❌ FAILED
 │   ├── aggregate-results.py       # 보안 검사 결과 통합
 │   ├── evaluate-gate.py           # 정책 기반 Gate 판단
 │   ├── create-pr-comment.py       # PR 댓글 자동 작성
-│   └── run-redteam-poc.sh         # B 파트 로컬 PoC
+│   ├── run-redteam-poc.sh         # B 파트 로컬 PoC
+│   ├── runtime-validation.py      # D파트 Runtime Validation v4 제출본
+│   └── runtime-validation-v3.py   # D파트 학습용 v3 보존본
 │
 ├── security/
 │   ├── baselines/
@@ -173,11 +175,14 @@ Gate Status: ❌ FAILED
 └── docs/
     ├── project.md                 # 프로젝트 가이드
     ├── pipeline-guide.md          # 파이프라인 운영 가이드
+    ├── runtime-validation-guide.md # D파트 Runtime Validation 가이드
+    ├── runtime-validation-v4-explanation.txt # v4 코드 설명
     ├── team-interface.md          # 팀 연동 인터페이스 및 협업 프로세스
     ├── red-team/                  # B 파트 PoC·탐지 기준
     └── tasks/
-        ├── A-part-task.md
-        └── B-part-task.md
+        ├── A-part-task.md         # A파트 작업 체크리스트
+        ├── B-part-task.md         # B파트 작업 체크리스트
+        └── D-part-task.md         # D파트 작업 체크리스트
 ```
 
 ---
