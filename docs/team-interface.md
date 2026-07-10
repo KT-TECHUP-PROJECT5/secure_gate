@@ -128,9 +128,10 @@ steps:
 | Health Check Endpoint             | `HEALTH_CHECK_PATH`, 기본 `/health`    | 연결 완료 |
 | Smoke Test 실행 명령어            | `python scripts/runtime-validation.py` / `SMOKE_TEST_PATHS` | 연결 완료 |
 | ZAP 실행 명령어                   | Workflow에서 `zap-baseline.py` 실행 후 `security/reports/zap-report.json` 저장 | 연결 완료 |
+| Nuclei 실행 명령어                | Workflow에서 `nuclei` 실행 후 `security/reports/nuclei-report.jsonl` 저장 | 연결 완료 |
 | Runtime Validation 결과 파일 경로 | `security/reports/runtime-report.json` | A파트 고정 |
 | 보안 헤더 검증 기준               | `REQUIRED_SECURITY_HEADERS` 사용       | 연결 완료 |
-| Runtime Validation 실패 기준      | Health/Smoke 실패 High, Header 누락 Medium, ZAP riskcode 매핑 | 연결 완료 |
+| Runtime Validation 실패 기준      | Health/Smoke 실패 High, Header 누락 Medium, ZAP/Nuclei severity 매핑 | 연결 완료 |
 
 ---
 

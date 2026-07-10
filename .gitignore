@@ -3,6 +3,7 @@
 
 # 보안 검사 결과 파일 (CI에서 생성, 로컬 보관 불필요)
 security/reports/*.json
+security/reports/*.jsonl
 security/reports/*.sarif
 
 # Python

@@ -69,6 +69,29 @@ jobs:
             -t "$TARGET_URL" \
             -J zap-report.json || true
 
+      - name: Run Post-deploy Nuclei Scan
+        env:
+          NUCLEI_TARGET_URL: ${{ vars.NUCLEI_TARGET_URL }}
+          ZAP_TARGET_URL: ${{ vars.ZAP_TARGET_URL }}
+          STAGING_URL: ${{ vars.STAGING_URL }}
+          NUCLEI_SEVERITIES: ${{ vars.NUCLEI_SEVERITIES }}
+        run: |
+          TARGET_URL="${NUCLEI_TARGET_URL:-${ZAP_TARGET_URL:-$STAGING_URL}}"
+          if [ -z "$TARGET_URL" ]; then
+            echo "NUCLEI_TARGET_URL/ZAP_TARGET_URL/STAGING_URL is not set. Skipping Nuclei scan."
+            exit 0
+          fi
+
+          mkdir -p security/reports
+          docker run --rm \
+            -v "${{ github.workspace }}/security/reports:/app/reports:rw" \
+            projectdiscovery/nuclei:latest \
+            -u "$TARGET_URL" \
+            -severity "${NUCLEI_SEVERITIES:-medium,high,critical}" \
+            -jsonl \
+            -o /app/reports/nuclei-report.jsonl \
+            -silent || true
+
       - name: Run Post-deploy Runtime Validation
         env:
           RUNTIME_BASE_URL: ${{ vars.STAGING_URL }}
@@ -77,6 +100,7 @@ jobs:
           SMOKE_TEST_PATHS: ${{ vars.SMOKE_TEST_PATHS }}
           REQUIRED_SECURITY_HEADERS: ${{ vars.REQUIRED_SECURITY_HEADERS }}
           ZAP_REPORT_PATH: security/reports/zap-report.json
+          NUCLEI_REPORT_PATH: security/reports/nuclei-report.jsonl
         run: python scripts/runtime-validation.py
 
       - name: Upload post-deploy runtime validation report

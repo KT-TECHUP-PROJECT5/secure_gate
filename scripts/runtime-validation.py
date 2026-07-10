@@ -4,8 +4,8 @@ runtime-validation.py
 
 D part Runtime Validation submission script.
 
-It checks a running application, converts an optional OWASP ZAP JSON report, and
-writes the team common schema to security/reports/runtime-report.json.
+It checks a running application, converts optional OWASP ZAP and Nuclei reports,
+and writes the team common schema to security/reports/runtime-report.json.
 """
 
 import argparse
@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 
 OUTPUT_PATH = Path("security/reports/runtime-report.json")
 DEFAULT_ZAP_REPORT_PATH = Path("security/reports/zap-report.json")
+DEFAULT_NUCLEI_REPORT_PATH = Path("security/reports/nuclei-report.jsonl")
 DEFAULT_REQUIRED_HEADERS = [
     "x-content-type-options",
     "x-frame-options",
@@ -372,6 +373,139 @@ def parse_zap_report(zap_report_path):
     return findings
 
 
+def map_nuclei_severity(value):
+    severity = str(value or "").strip().lower()
+    if severity in {"critical", "high", "medium", "low"}:
+        return severity
+    return "low"
+
+
+def finding_id_component(value):
+    cleaned = re.sub(r"[^a-zA-Z0-9_.-]+", "-", str(value or "").strip())
+    return cleaned.strip("-") or "finding"
+
+
+def nuclei_record_info(record):
+    info = record.get("info", {})
+    if isinstance(info, dict):
+        return info
+    return {}
+
+
+def nuclei_record_location(record):
+    return (
+        record.get("matched-at")
+        or record.get("matched")
+        or record.get("url")
+        or record.get("host")
+        or "nuclei-report"
+    )
+
+
+def nuclei_record_description(record):
+    info = nuclei_record_info(record)
+    parts = []
+
+    description = info.get("description")
+    if description:
+        parts.append(str(description))
+
+    tags = info.get("tags")
+    if isinstance(tags, list) and tags:
+        parts.append("Tags: " + ", ".join(str(tag) for tag in tags))
+    elif tags:
+        parts.append(f"Tags: {tags}")
+
+    matcher_name = record.get("matcher-name") or record.get("matcher_name")
+    if matcher_name:
+        parts.append(f"Matcher: {matcher_name}")
+
+    return " ".join(parts) or "Nuclei reported a runtime security finding."
+
+
+def make_nuclei_finding(record):
+    info = nuclei_record_info(record)
+    template_id = record.get("template-id") or record.get("template_id") or record.get("id")
+    severity = info.get("severity") or record.get("severity")
+    title = info.get("name") or record.get("name") or template_id or "Nuclei finding"
+
+    return make_finding(
+        f"runtime.nuclei.{finding_id_component(template_id)}",
+        map_nuclei_severity(severity),
+        str(title),
+        nuclei_record_description(record),
+        nuclei_record_location(record),
+    )
+
+
+def parse_nuclei_json_value(value, source):
+    if isinstance(value, list):
+        findings = []
+        for item in value:
+            if isinstance(item, dict):
+                findings.append(make_nuclei_finding(item))
+        return findings
+
+    if isinstance(value, dict):
+        if isinstance(value.get("results"), list):
+            return parse_nuclei_json_value(value["results"], source)
+        return [make_nuclei_finding(value)]
+
+    return [
+        make_finding(
+            "runtime.nuclei.parse-error",
+            "medium",
+            "Nuclei report has unexpected structure",
+            "Expected each Nuclei JSONL line to be a JSON object.",
+            source,
+        )
+    ]
+
+
+def parse_nuclei_report(nuclei_report_path):
+    path = Path(nuclei_report_path)
+    if not path.exists():
+        return []
+
+    findings = []
+    try:
+        with open(path, encoding="utf-8") as file:
+            for line_number, line in enumerate(file, start=1):
+                stripped_line = line.strip()
+                if not stripped_line:
+                    continue
+
+                source = f"{path}:{line_number}"
+                try:
+                    nuclei_data = json.loads(stripped_line)
+                except json.JSONDecodeError as error:
+                    findings.append(
+                        make_finding(
+                            "runtime.nuclei.parse-error",
+                            "medium",
+                            "Nuclei report could not be parsed",
+                            f"Invalid JSONL in {source}: {error}",
+                            source,
+                        )
+                    )
+                    continue
+
+                findings.extend(parse_nuclei_json_value(nuclei_data, source))
+
+    except OSError as error:
+        return [
+            make_finding(
+                "runtime.nuclei.read-error",
+                "medium",
+                "Nuclei report could not be read",
+                f"Could not read {path}: {error}",
+                str(path),
+            )
+        ]
+
+    return findings
+
+
 def decide_status(findings):
     severities = [finding["severity"] for finding in findings]
 
@@ -447,6 +581,7 @@ def build_report(args):
         findings.extend(check_headers(base_url, required_headers, args.timeout))
 
     findings.extend(parse_zap_report(args.zap_report))
+    findings.extend(parse_nuclei_report(args.nuclei_report))
 
     return {
         "status": decide_status(findings),
@@ -481,6 +616,10 @@ def parse_args():
     parser.add_argument(
         "--zap-report",
         default=env_or_default("ZAP_REPORT_PATH", str(DEFAULT_ZAP_REPORT_PATH)),
+    )
+    parser.add_argument(
+        "--nuclei-report",
+        default=env_or_default("NUCLEI_REPORT_PATH", str(DEFAULT_NUCLEI_REPORT_PATH)),
     )
     parser.add_argument("--output", default=str(OUTPUT_PATH))
     parser.add_argument("--timeout", type=float, default=env_timeout())

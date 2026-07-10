@@ -73,8 +73,8 @@ flowchart TD
 | SAST | Semgrep 기반 코드 취약점 정적 분석 |
 | Secret Scan | Gitleaks 기반 API Key, JWT Secret, DB Password 등 민감정보 탐지 |
 | Dependency Scan | Trivy 기반 의존성 및 CVE 검사 |
-| DAST | OWASP ZAP 기반 실행 중인 웹 애플리케이션 동적 분석 |
-| Runtime Validation | Health Check, Smoke Test, 보안 헤더(CSP/HSTS/X-Frame-Options) 검증, ZAP 결과 연동 |
+| DAST | OWASP ZAP, Nuclei 기반 실행 중인 웹 애플리케이션 동적 분석 |
+| Runtime Validation | Health Check, Smoke Test, 보안 헤더(CSP/HSTS/X-Frame-Options) 검증, ZAP/Nuclei 결과 연동 |
 | Aggregator | 각 보안 도구의 결과 파일을 하나의 Summary로 통합 |
 | Policy Evaluator | 위험도 및 정책 기준으로 Merge/배포 가능 여부 판단 |
 | Merge 차단 | Critical/High 취약점 또는 Secret 탐지 시 PR 자동 차단 |
