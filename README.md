@@ -74,7 +74,7 @@ flowchart TD
 | Secret Scan | Gitleaks 기반 API Key, JWT Secret, DB Password 등 민감정보 탐지 |
 | Dependency Scan | Trivy 기반 의존성 및 CVE 검사 |
 | DAST | OWASP ZAP, Nuclei 기반 실행 중인 웹 애플리케이션 동적 분석 |
-| Runtime Validation | Health Check, Smoke Test, 보안 헤더(CSP/HSTS/X-Frame-Options) 검증, ZAP/Nuclei 결과 연동 |
+| Runtime Validation | Health Check, Smoke Test, 보안 헤더(CSP/HSTS/X-Frame-Options), Custom Runtime Check, ZAP/Nuclei 결과 연동 |
 | Aggregator | 각 보안 도구의 결과 파일을 하나의 Summary로 통합 |
 | Policy Evaluator | 위험도 및 정책 기준으로 Merge/배포 가능 여부 판단 |
 | Merge 차단 | Critical/High 취약점 또는 Secret 탐지 시 PR 자동 차단 |
@@ -137,8 +137,8 @@ Gate Status: ❌ FAILED
 | SAST | Semgrep |
 | Secret Scan | Gitleaks |
 | Dependency Scan | Trivy |
-| DAST | OWASP ZAP |
-| Runtime Validation | Health Check, Smoke Test, Security Header Check |
+| DAST | OWASP ZAP, Nuclei |
+| Runtime Validation | Health Check, Smoke Test, Security Header Check, Custom Runtime Check |
 | Aggregator / Policy Evaluator | Python |
 | PR Comment | GitHub API |
 | Deployment | Docker Build, Staging Deploy |
@@ -159,8 +159,7 @@ Gate Status: ❌ FAILED
 │   ├── evaluate-gate.py           # 정책 기반 Gate 판단
 │   ├── create-pr-comment.py       # PR 댓글 자동 작성
 │   ├── run-redteam-poc.sh         # B 파트 로컬 PoC
-│   ├── runtime-validation.py      # D파트 Runtime Validation v4 제출본
-│   └── runtime-validation-v3.py   # D파트 학습용 v3 보존본
+│   └── runtime-validation.py      # D파트 Runtime Validation 제출본
 │
 ├── security/
 │   ├── baselines/
@@ -194,7 +193,7 @@ Gate Status: ❌ FAILED
 | A. Platform / Pipeline | GitHub Actions 파이프라인 구조, Aggregator, Gate Evaluator, PR 댓글 자동화, CD Workflow |
 | B. Application Security / Red Team | 취약점 포함 테스트 앱 구성, 공격 PoC 작성 및 검증 |
 | C. Security Scan | Semgrep, Gitleaks, Trivy 도구 셋업 및 튜닝 |
-| D. Runtime Validation | DAST, 보안 헤더 검증, Health Check, Smoke Test |
+| D. Runtime Validation | DAST, 보안 헤더 검증, Health Check, Smoke Test, Custom Runtime Check |
 | E. AppSec / Policy / IR | OWASP/CVSS 기반 정책 룰, IR 플레이북, PR 수정 가이드 |
 
 ---

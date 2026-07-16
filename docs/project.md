@@ -113,7 +113,7 @@ flowchart TD
 | SAST                   | Semgrep 기반 코드 취약점 정적 분석                              |
 | Secret Scan            | Gitleaks 기반 API Key, JWT Secret, DB Password 등 민감정보 탐지 |
 | Dependency Scan        | Trivy 기반 의존성 및 CVE 검사                                   |
-| DAST                   | OWASP ZAP 기반 실행 중인 웹 애플리케이션 동적 분석              |
+| DAST                   | OWASP ZAP, Nuclei 기반 실행 중인 웹 애플리케이션 동적 분석      |
 | Health Check           | 배포된 서비스의 기본 정상 동작 확인                             |
 | Smoke Test             | 로그인, 주요 API, 핵심 페이지 등 기본 기능 검증                 |
 | 보안 헤더 검증         | CSP, HSTS, X-Frame-Options 등 기본 보안 설정 확인               |
@@ -135,8 +135,8 @@ flowchart TD
 | SAST               | Semgrep                                         |
 | Secret Scan        | Gitleaks                                        |
 | Dependency Scan    | Trivy                                           |
-| DAST               | OWASP ZAP                                       |
-| Runtime Validation | Health Check, Smoke Test, Security Header Check |
+| DAST               | OWASP ZAP, Nuclei                               |
+| Runtime Validation | Health Check, Smoke Test, Security Header Check, Custom Runtime Check |
 | Report Format      | JSON, SARIF, Markdown, HTML                     |
 | Aggregator         | Python Script                                   |
 | Policy Evaluator   | Python Script                                   |
@@ -152,7 +152,7 @@ flowchart TD
 | A. Platform / Pipeline             | GitHub Actions, PR 트리거, Aggregator 뼈대, Merge 차단, PR 댓글 자동화, CD Workflow, Docker Build/CD 연동 |
 | B. Application Security / Red Team | 앱 코드와 취약점 통합, 공격 PoC 작성 및 검증, 오탐/미탐 교차검증                                          |
 | C. Security Scan                   | SAST, Secret Scan, 의존성 검사 도구 셋업 및 튜닝, SARIF 출력                                              |
-| D. Runtime Validation              | DAST, 보안 헤더 검증, Health Check, Smoke Test, Staging 실행 환경                                         |
+| D. Runtime Validation              | DAST, 보안 헤더 검증, Health Check, Smoke Test, Custom Runtime Check, Staging 실행 기준                   |
 | E. AppSec / Policy / IR            | OWASP/CVSS 기준, 정책 룰, IR 플레이북, PR 댓글 수정 가이드 템플릿                                         |
 
 ---
@@ -295,7 +295,10 @@ A 파트에 전달해야 할 항목:
 - Smoke Test 실행 명령어
 - ZAP 실행 명령어
 - ZAP 결과 파일 경로
+- Nuclei 실행 명령어
+- Nuclei 결과 파일 경로
 - 보안 헤더 검증 기준
+- Custom Runtime Check 기준
 - Runtime Validation 실패 기준
 
 ---
@@ -399,8 +402,8 @@ Production 배포 허용 또는 차단
 | SAST 결과                 | Semgrep 기반 코드 취약점 분석 결과            |
 | Secret Scan 결과          | Gitleaks 기반 민감정보 탐지 결과              |
 | Dependency Scan 결과      | Trivy 기반 CVE 탐지 결과                      |
-| DAST 결과                 | ZAP 기반 동적 분석 결과                       |
-| Runtime Validation 결과   | Health Check, Smoke Test, 보안 헤더 검증 결과 |
+| DAST 결과                 | ZAP/Nuclei 기반 동적 분석 결과                |
+| Runtime Validation 결과   | Health Check, Smoke Test, 보안 헤더, Custom Check 검증 결과 |
 | IR 플레이북               | 주요 취약점 대응 절차                         |
 | 최종 발표 자료            | 데모 흐름 및 결과 정리                        |
 

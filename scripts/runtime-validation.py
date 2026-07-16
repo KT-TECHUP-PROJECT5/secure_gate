@@ -9,11 +9,13 @@ and writes the team common schema to security/reports/runtime-report.json.
 """
 
 import argparse
+import http.cookiejar
 import html
 import json
 import os
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
@@ -26,6 +28,15 @@ DEFAULT_REQUIRED_HEADERS = [
     "x-frame-options",
     "content-security-policy",
 ]
+DEFAULT_CUSTOM_CHECKS = [
+    "debug-exposure",
+    "docs-exposure",
+    "reflected-xss",
+    "search-sqli",
+    "admin-access",
+    "idor",
+]
+SUPPORTED_CUSTOM_CHECKS = set(DEFAULT_CUSTOM_CHECKS)
 DISABLED_VALUES = {"none", "off", "false", "disable", "disabled"}
 
 
@@ -145,6 +156,40 @@ def request_url(url, method, timeout):
         raise RuntimeError(str(error)) from error
 
 
+def request_text(url, method, timeout, data=None, headers=None, opener=None):
+    request_headers = {"User-Agent": "secure-gate-runtime-validation/1.0"}
+    if headers:
+        request_headers.update(headers)
+
+    body = None
+    if data is not None:
+        body = urllib.parse.urlencode(data).encode("utf-8")
+        request_headers.setdefault("Content-Type", "application/x-www-form-urlencoded")
+
+    request = urllib.request.Request(url, data=body, method=method, headers=request_headers)
+    open_request = opener.open if opener is not None else urllib.request.urlopen
+
+    try:
+        with open_request(request, timeout=timeout) as response:
+            raw_body = response.read()
+            charset = response.headers.get_content_charset() or "utf-8"
+            return response.status, normalize_headers(response.headers), raw_body.decode(
+                charset,
+                errors="replace",
+            )
+
+    except urllib.error.HTTPError as error:
+        raw_body = error.read()
+        charset = error.headers.get_content_charset() or "utf-8"
+        return error.code, normalize_headers(error.headers), raw_body.decode(
+            charset,
+            errors="replace",
+        )
+
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
+        raise RuntimeError(str(error)) from error
+
+
 def check_health(base_url, health_path, expected_statuses, timeout):
     health_url = join_url(base_url, health_path)
 
@@ -247,6 +292,294 @@ def check_headers(base_url, required_headers, timeout):
                     base_url,
                 )
             )
+
+    return findings
+
+
+def parse_custom_checks(raw_value):
+    normalized = raw_value.strip().lower()
+    if normalized in DISABLED_VALUES:
+        return [], []
+
+    requested_checks = split_csv(normalized)
+    if not requested_checks or "all" in requested_checks:
+        requested_checks = list(DEFAULT_CUSTOM_CHECKS)
+
+    checks = []
+    unknown_checks = []
+    for check in requested_checks:
+        if check in SUPPORTED_CUSTOM_CHECKS:
+            if check not in checks:
+                checks.append(check)
+        else:
+            unknown_checks.append(check)
+
+    return checks, unknown_checks
+
+
+def check_debug_exposure(base_url, timeout):
+    checks = {
+        "/debug/error": ["Debug Information", "Internal Hint", "app/routers/errors.py"],
+        "/debug/db-error": [
+            "Debug Information",
+            "Internal Hint",
+            "SELECT * FROM not_existing_table",
+        ],
+        "/debug/path-error": ["Debug Information", "Internal Hint", "/app/routers/errors.py"],
+    }
+    findings = []
+
+    for path, indicators in checks.items():
+        debug_url = join_url(base_url, path)
+        try:
+            status_code, _, response_body = request_text(debug_url, "GET", timeout)
+        except RuntimeError as error:
+            findings.append(
+                make_finding(
+                    "runtime.custom.debug.unreachable",
+                    "medium",
+                    "Debug exposure check request failed",
+                    f"Could not reach debug endpoint: {error}",
+                    debug_url,
+                )
+            )
+            continue
+
+        if status_code == 200 and any(indicator in response_body for indicator in indicators):
+            findings.append(
+                make_finding(
+                    f"runtime.custom.debug-exposure.{finding_id_component(path)}",
+                    "medium",
+                    "Debug endpoint exposes internal information",
+                    "A debug endpoint returned internal error details or implementation hints.",
+                    debug_url,
+                )
+            )
+
+    return findings
+
+
+def check_docs_exposure(base_url, timeout):
+    checks = {
+        "/docs": ["Swagger UI", "openapi.json"],
+        "/redoc": ["ReDoc", "openapi.json"],
+    }
+    findings = []
+
+    for path, indicators in checks.items():
+        docs_url = join_url(base_url, path)
+        try:
+            status_code, _, response_body = request_text(docs_url, "GET", timeout)
+        except RuntimeError as error:
+            findings.append(
+                make_finding(
+                    "runtime.custom.docs.unreachable",
+                    "medium",
+                    "API documentation exposure check request failed",
+                    f"Could not reach documentation endpoint: {error}",
+                    docs_url,
+                )
+            )
+            continue
+
+        if status_code == 200 and any(indicator in response_body for indicator in indicators):
+            findings.append(
+                make_finding(
+                    f"runtime.custom.docs-exposure.{finding_id_component(path)}",
+                    "medium",
+                    "API documentation endpoint is exposed",
+                    "FastAPI interactive API documentation was reachable in the runtime target.",
+                    docs_url,
+                )
+            )
+
+    return findings
+
+
+def check_reflected_xss(base_url, timeout):
+    marker = "runtime-validation-xss"
+    payload = f'"><script>alert("{marker}")</script>'
+    query = urllib.parse.urlencode({"keyword": payload})
+    target_url = join_url(base_url, f"/posts?{query}")
+
+    try:
+        status_code, _, response_body = request_text(target_url, "GET", timeout)
+    except RuntimeError as error:
+        return [
+            make_finding(
+                "runtime.custom.reflected-xss.unreachable",
+                "medium",
+                "Reflected XSS check request failed",
+                f"Could not reach reflected XSS target: {error}",
+                target_url,
+            )
+        ]
+
+    if status_code == 200 and payload in response_body:
+        return [
+            make_finding(
+                "runtime.custom.reflected-xss.keyword",
+                "high",
+                "Search keyword is reflected without escaping",
+                "A script payload submitted through the keyword parameter was reflected in the HTML response without escaping.",
+                target_url,
+            )
+        ]
+
+    return []
+
+
+def check_search_sqli(base_url, timeout, payload):
+    query = urllib.parse.urlencode({"keyword": payload})
+    target_url = join_url(base_url, f"/posts?{query}")
+    private_post_markers = ["user1 비공개 게시글", "user2 비공개 게시글", "IDOR 확인용 비공개 글"]
+
+    try:
+        status_code, _, response_body = request_text(target_url, "GET", timeout)
+    except RuntimeError as error:
+        return [
+            make_finding(
+                "runtime.custom.search-sqli.unreachable",
+                "medium",
+                "Search SQL injection check request failed",
+                f"Could not reach search endpoint: {error}",
+                target_url,
+            )
+        ]
+
+    if status_code == 200 and any(marker in response_body for marker in private_post_markers):
+        return [
+            make_finding(
+                "runtime.custom.search-sqli.private-posts",
+                "high",
+                "Search query exposes private posts",
+                "A SQL injection payload submitted through the keyword parameter returned private post content in the public search response.",
+                target_url,
+            )
+        ]
+
+    return []
+
+
+def create_session_opener():
+    cookie_jar = http.cookiejar.CookieJar()
+    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+
+
+def login(base_url, username, password, timeout):
+    opener = create_session_opener()
+    login_url = join_url(base_url, "/login")
+    status_code, _, response_body = request_text(
+        login_url,
+        "POST",
+        timeout,
+        data={"username": username, "password": password},
+        opener=opener,
+    )
+    return opener, status_code, response_body
+
+
+def check_admin_access(base_url, timeout, username, password):
+    try:
+        opener, _, _ = login(base_url, username, password, timeout)
+        admin_url = join_url(base_url, "/admin")
+        status_code, _, response_body = request_text(admin_url, "GET", timeout, opener=opener)
+    except RuntimeError as error:
+        return [
+            make_finding(
+                "runtime.custom.admin-access.unreachable",
+                "medium",
+                "Admin access check request failed",
+                f"Could not complete authenticated admin access check: {error}",
+                join_url(base_url, "/admin"),
+            )
+        ]
+
+    admin_markers = ["운영 관리", "회원 목록", "게시글 관리"]
+    if status_code == 200 and any(marker in response_body for marker in admin_markers):
+        return [
+            make_finding(
+                "runtime.custom.admin-access.user-role",
+                "high",
+                "Non-admin user can access administrator page",
+                f"User '{username}' reached the administrator page without an admin role check.",
+                join_url(base_url, "/admin"),
+            )
+        ]
+
+    return []
+
+
+def check_idor(base_url, timeout, username, password, private_post_id):
+    try:
+        opener, _, _ = login(base_url, username, password, timeout)
+        idor_url = join_url(base_url, f"/posts/private/{private_post_id}")
+        status_code, _, response_body = request_text(idor_url, "GET", timeout, opener=opener)
+    except RuntimeError as error:
+        return [
+            make_finding(
+                "runtime.custom.idor.unreachable",
+                "medium",
+                "IDOR check request failed",
+                f"Could not complete authenticated IDOR check: {error}",
+                join_url(base_url, f"/posts/private/{private_post_id}"),
+            )
+        ]
+
+    private_markers = ["비공개", "다른 계정에서 직접 접근", "private"]
+    if status_code == 200 and any(marker in response_body for marker in private_markers):
+        return [
+            make_finding(
+                "runtime.custom.idor.private-post",
+                "high",
+                "User can access another user's private post",
+                f"User '{username}' reached private post id {private_post_id}.",
+                idor_url,
+            )
+        ]
+
+    return []
+
+
+def check_custom_runtime(base_url, args):
+    checks, unknown_checks = parse_custom_checks(args.custom_checks)
+    findings = []
+
+    for unknown_check in unknown_checks:
+        findings.append(
+            make_config_finding(
+                "CUSTOM_RUNTIME_CHECKS",
+                f"Unsupported custom runtime check: {unknown_check}",
+            )
+        )
+
+    if "debug-exposure" in checks:
+        findings.extend(check_debug_exposure(base_url, args.timeout))
+    if "docs-exposure" in checks:
+        findings.extend(check_docs_exposure(base_url, args.timeout))
+    if "reflected-xss" in checks:
+        findings.extend(check_reflected_xss(base_url, args.timeout))
+    if "search-sqli" in checks:
+        findings.extend(check_search_sqli(base_url, args.timeout, args.custom_sqli_payload))
+    if "admin-access" in checks:
+        findings.extend(
+            check_admin_access(
+                base_url,
+                args.timeout,
+                args.custom_username,
+                args.custom_password,
+            )
+        )
+    if "idor" in checks:
+        findings.extend(
+            check_idor(
+                base_url,
+                args.timeout,
+                args.custom_username,
+                args.custom_password,
+                args.custom_private_post_id,
+            )
+        )
 
     return findings
 
@@ -579,6 +912,7 @@ def build_report(args):
         )
         findings.extend(check_smoke(base_url, smoke_tests, args.timeout))
         findings.extend(check_headers(base_url, required_headers, args.timeout))
+        findings.extend(check_custom_runtime(base_url, args))
 
     findings.extend(parse_zap_report(args.zap_report))
     findings.extend(parse_nuclei_report(args.nuclei_report))
@@ -620,6 +954,27 @@ def parse_args():
     parser.add_argument(
         "--nuclei-report",
         default=env_or_default("NUCLEI_REPORT_PATH", str(DEFAULT_NUCLEI_REPORT_PATH)),
+    )
+    parser.add_argument(
+        "--custom-checks",
+        default=env_or_default("CUSTOM_RUNTIME_CHECKS", ",".join(DEFAULT_CUSTOM_CHECKS)),
+        help="Comma-separated custom runtime checks. Use 'none' to disable.",
+    )
+    parser.add_argument(
+        "--custom-username",
+        default=env_or_default("CUSTOM_RUNTIME_USERNAME", "user1"),
+    )
+    parser.add_argument(
+        "--custom-password",
+        default=env_or_default("CUSTOM_RUNTIME_PASSWORD", "password123"),
+    )
+    parser.add_argument(
+        "--custom-private-post-id",
+        default=env_or_default("CUSTOM_RUNTIME_PRIVATE_POST_ID", "4"),
+    )
+    parser.add_argument(
+        "--custom-sqli-payload",
+        default=env_or_default("CUSTOM_RUNTIME_SQLI_PAYLOAD", "') OR '1'='1' --"),
     )
     parser.add_argument("--output", default=str(OUTPUT_PATH))
     parser.add_argument("--timeout", type=float, default=env_timeout())

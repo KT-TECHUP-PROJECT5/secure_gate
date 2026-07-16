@@ -1,6 +1,6 @@
 ---
 문서명: 프로젝트 협업용 가이드
-최신화: 2026-06-30
+최신화: 2026-07-15
 작성자: 이윤재
 Version: 1.1.0
 ---
@@ -122,16 +122,17 @@ steps:
 
 | 항목                              | 내용                                   | 상태       |
 | --------------------------------- | -------------------------------------- | ---------- |
-| Staging 실행 방식                 | CD Workflow의 `post-deploy-validation`에서 검증 | 연결 완료 |
-| Staging URL                       | `STAGING_URL` Repository Variable 사용 | 팀 확정 필요 |
-| ZAP 대상 URL                      | `ZAP_TARGET_URL` Repository Variable 사용. 미설정 시 `RUNTIME_BASE_URL`/`STAGING_URL` 사용 | 연결 완료 |
-| Health Check Endpoint             | `HEALTH_CHECK_PATH`, 기본 `/health`    | 연결 완료 |
-| Smoke Test 실행 명령어            | `python scripts/runtime-validation.py` / `SMOKE_TEST_PATHS` | 연결 완료 |
-| ZAP 실행 명령어                   | Workflow에서 `zap-baseline.py` 실행 후 `security/reports/zap-report.json` 저장 | 연결 완료 |
-| Nuclei 실행 명령어                | Workflow에서 `nuclei` 실행 후 `security/reports/nuclei-report.jsonl` 저장 | 연결 완료 |
+| PR 단계 실행 방식                 | GitHub Actions Runner 내부에서 B파트 앱을 임시 실행. PostgreSQL은 `web/docker-compose.yml`, FastAPI는 `uvicorn` 사용 | D파트 전달 완료 / A파트 연결 필요 |
+| PR 단계 Runtime URL               | 고정 URL이 없으면 `RUNTIME_BASE_URL=http://127.0.0.1:8000` 사용 | D파트 전달 완료 |
+| 외부 Staging URL                  | 외부 Staging이 확정된 경우 `STAGING_URL` Repository Variable 사용 | 팀 확정 필요 |
+| Health Check Endpoint             | `HEALTH_CHECK_PATH=/posts`, 기대 상태 코드 `200` | D파트 기준 확정 |
+| Smoke Test 실행 경로              | `SMOKE_TEST_PATHS="/login=200,/posts=200,/upload=200\|303,/docs=200,/redoc=200"` | D파트 기준 확정 |
+| ZAP 실행 명령어                   | `zap-baseline.py` 실행 후 `security/reports/zap-report.json` 저장 | D파트 전달 완료 / A파트 연결 필요 |
+| Nuclei 실행 명령어                | `medium,high,critical`, `xss`, `timeout 5m`, `rate-limit=10`, `c=5`, `retries=0`, `timeout=5`, `-ni` 기준으로 실행 후 `security/reports/nuclei-report.jsonl` 저장 | D파트 전달 완료 / A파트 연결 필요 |
+| Custom Runtime Check              | `debug-exposure`, `docs-exposure`, `reflected-xss`, `search-sqli`, `admin-access`, `idor` | D파트 구현 완료 |
 | Runtime Validation 결과 파일 경로 | `security/reports/runtime-report.json` | A파트 고정 |
-| 보안 헤더 검증 기준               | `REQUIRED_SECURITY_HEADERS` 사용       | 연결 완료 |
-| Runtime Validation 실패 기준      | Health/Smoke 실패 High, Header 누락 Medium, ZAP/Nuclei severity 매핑 | 연결 완료 |
+| 보안 헤더 검증 기준               | `x-content-type-options`, `x-frame-options`, `content-security-policy`; HTTPS는 `strict-transport-security` 자동 추가 | D파트 기준 확정 |
+| Runtime Validation 실패 기준      | Health/Smoke 실패 High, Header 누락 Medium, Custom/ZAP/Nuclei severity 매핑 | D파트 기준 확정 |
 
 ---
 

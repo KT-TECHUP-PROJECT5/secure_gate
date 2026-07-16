@@ -41,7 +41,7 @@ jobs:
           echo "배포 방식 (EC2 / Docker Compose / Cloud) 확정 후 실제 배포 명령어로 교체 예정"
 
   # ──────────────────────────────────────────
-  # 3. Post-deploy Validation - D파트
+  # 3. Post-deploy Validation - D파트 연결 예정
   # ──────────────────────────────────────────
   post-deploy-validation:
     name: Post-deploy Validation
@@ -50,62 +50,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run Post-deploy ZAP Baseline
-        env:
-          ZAP_TARGET_URL: ${{ vars.ZAP_TARGET_URL }}
-          STAGING_URL: ${{ vars.STAGING_URL }}
+      - name: "[Placeholder] Health Check"
         run: |
-          TARGET_URL="${ZAP_TARGET_URL:-$STAGING_URL}"
-          if [ -z "$TARGET_URL" ]; then
-            echo "ZAP_TARGET_URL/STAGING_URL is not set. Skipping ZAP baseline."
-            exit 0
-          fi
+          echo "Health Check placeholder"
+          echo "D파트의 Health Check Endpoint 확정 후 교체 예정"
 
-          mkdir -p security/reports
-          docker run --rm \
-            -v "${{ github.workspace }}/security/reports:/zap/wrk:rw" \
-            ghcr.io/zaproxy/zaproxy:stable \
-            zap-baseline.py \
-            -t "$TARGET_URL" \
-            -J zap-report.json || true
-
-      - name: Run Post-deploy Nuclei Scan
-        env:
-          NUCLEI_TARGET_URL: ${{ vars.NUCLEI_TARGET_URL }}
-          ZAP_TARGET_URL: ${{ vars.ZAP_TARGET_URL }}
-          STAGING_URL: ${{ vars.STAGING_URL }}
-          NUCLEI_SEVERITIES: ${{ vars.NUCLEI_SEVERITIES }}
+      - name: "[Placeholder] Smoke Test"
         run: |
-          TARGET_URL="${NUCLEI_TARGET_URL:-${ZAP_TARGET_URL:-$STAGING_URL}}"
-          if [ -z "$TARGET_URL" ]; then
-            echo "NUCLEI_TARGET_URL/ZAP_TARGET_URL/STAGING_URL is not set. Skipping Nuclei scan."
-            exit 0
-          fi
+          echo "Smoke Test placeholder"
+          echo "D파트의 Smoke Test 명령어 확정 후 교체 예정"
 
-          mkdir -p security/reports
-          docker run --rm \
-            -v "${{ github.workspace }}/security/reports:/app/reports:rw" \
-            projectdiscovery/nuclei:latest \
-            -u "$TARGET_URL" \
-            -severity "${NUCLEI_SEVERITIES:-medium,high,critical}" \
-            -jsonl \
-            -o /app/reports/nuclei-report.jsonl \
-            -silent || true
+      - name: "[Placeholder] Post-deploy DAST"
+        run: |
+          echo "Post-deploy DAST placeholder"
+          echo "D파트의 ZAP 명령어 및 Staging URL 확정 후 교체 예정"
 
-      - name: Run Post-deploy Runtime Validation
-        env:
-          RUNTIME_BASE_URL: ${{ vars.STAGING_URL }}
-          HEALTH_CHECK_PATH: ${{ vars.HEALTH_CHECK_PATH }}
-          HEALTH_EXPECTED_STATUS: ${{ vars.HEALTH_EXPECTED_STATUS }}
-          SMOKE_TEST_PATHS: ${{ vars.SMOKE_TEST_PATHS }}
-          REQUIRED_SECURITY_HEADERS: ${{ vars.REQUIRED_SECURITY_HEADERS }}
-          ZAP_REPORT_PATH: security/reports/zap-report.json
-          NUCLEI_REPORT_PATH: security/reports/nuclei-report.jsonl
-        run: python scripts/runtime-validation.py
-
-      - name: Upload post-deploy runtime validation report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: post-deploy-runtime-report
-          path: security/reports/runtime-report.json
+      - name: "[Placeholder] Security Header Check"
+        run: |
+          echo "Security Header Check placeholder"
+          echo "D파트의 보안 헤더 검증 기준 확정 후 교체 예정"
