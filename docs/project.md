@@ -1,8 +1,8 @@
 ---
 문서명: Secure PR Gate 프로젝트 기획서
-최신화: 2026-06-30
+최신화: 2026-07-20
 작성자: 이윤재
-Version: 1.1.0
+Version: 1.3.0
 ---
 
 # Secure PR Gate 프로젝트 기획서
@@ -29,7 +29,7 @@ Pull Request와 배포 파이프라인에서 보안 검사를 자동 수행하�
 
 특히 SQL Injection, XSS, SSRF, 하드코딩된 Secret, 취약한 의존성, 보안 헤더 미설정과 같은 문제는 개발 단계에서 조기에 탐지하지 못하면 실제 보안 사고로 이어질 수 있다.
 
-본 프로젝트는 GitHub Actions 기반 CI/CD 파이프라인에 보안 검사를 통합하여, Pull Request 단계에서 취약 코드를 사전에 탐지하고, 위험도 기준에 따라 Merge를 차단하거나 경고하는 DevSecOps 보안 게이트웨이 시스템을 구축하는 것을 목표로 한다.
+본 프로젝트는 GitHub Actions Reusable Workflow 기반 CI/CD 파이프라인에 보안 검사를 통합하여, Pull Request 단계에서 취약 코드를 사전에 탐지하고, 위험도 기준에 따라 Merge를 차단하거나 경고하는 DevSecOps 보안 게이트웨이 시스템을 구축하는 것을 목표로 한다. 다른 저장소는 프로젝트 전체를 복사하지 않고, 얇은 caller workflow로 Secure PR Gate를 호출하여 사용한다.
 
 ---
 
@@ -60,6 +60,8 @@ CI/CD 파이프라인에 SAST, Secret Scan, 의존성 검사, DAST, Runtime Vali
 본 프로젝트는 CI/CD 도구 자체를 새로 만드는 것이 아니라, GitHub Actions 기반 CI/CD 파이프라인 위에 보안 검사, 결과 통합, 정책 판단, PR 피드백, Merge/배포 차단 기능을 결합한 DevSecOps 보안 게이트웨이 시스템이다.
 
 즉, 단일 프로그램이나 단순 보안 스캐너가 아니라, 여러 보안 도구와 개발 파이프라인을 연결하는 자동화 시스템에 가깝다.
+
+배포 형태는 서버 애플리케이션이 아니라 **Reusable Workflow + Git 태그(`@v1`)** 이다. 사용자 프로젝트는 PR 이벤트를 받는 caller만 추가하고, 핵심 실행 로직은 `secure_gate` 저장소의 reusable workflow가 담당한다.
 
 ---
 
@@ -110,10 +112,11 @@ flowchart TD
 | 기능                   | 설명                                                            |
 | ---------------------- | --------------------------------------------------------------- |
 | PR 자동 트리거         | PR 생성 또는 업데이트 시 GitHub Actions 실행                    |
-| SAST                   | Semgrep 기반 코드 취약점 정적 분석                              |
+| SAST                   | Semgrep 기반 코드 취약점 정적 분석 (기본 도구)                  |
 | Secret Scan            | Gitleaks 기반 API Key, JWT Secret, DB Password 등 민감정보 탐지 |
 | Dependency Scan        | Trivy 기반 의존성 및 CVE 검사                                   |
-| DAST                   | OWASP ZAP 기반 실행 중인 웹 애플리케이션 동적 분석              |
+| SBOM                   | CycloneDX 형식 구성품·버전·의존 관계 목록 (Trivy로 생성)        |
+| DAST                   | OWASP ZAP + Nuclei 기반 실행 중인 웹 애플리케이션 동적 분석     |
 | Health Check           | 배포된 서비스의 기본 정상 동작 확인                             |
 | Smoke Test             | 로그인, 주요 API, 핵심 페이지 등 기본 기능 검증                 |
 | 보안 헤더 검증         | CSP, HSTS, X-Frame-Options 등 기본 보안 설정 확인               |
@@ -122,26 +125,27 @@ flowchart TD
 | Merge 차단             | Critical/High 취약점 또는 Secret 탐지 시 PR 차단                |
 | PR 댓글 자동화         | 검사 결과, 차단 사유, 수정 가이드를 PR 댓글로 제공              |
 | CD Workflow            | main Merge 이후 Docker Build 및 Staging 배포                    |
-| Post-deploy Validation | Staging 배포 후 보안 검증 수행                                  |
+| Post-deploy Validation | Staging 배포 후 Health Check / Smoke Test / DAST 재검증         |
 
 ---
 
 ## 7. 기술 스택
 
-| 영역               | 기술                                            |
-| ------------------ | ----------------------------------------------- |
-| CI/CD              | GitHub Actions                                  |
-| Container          | Docker                                          |
-| SAST               | Semgrep                                         |
-| Secret Scan        | Gitleaks                                        |
-| Dependency Scan    | Trivy                                           |
-| DAST               | OWASP ZAP                                       |
-| Runtime Validation | Health Check, Smoke Test, Security Header Check |
-| Report Format      | JSON, SARIF, Markdown, HTML                     |
-| Aggregator         | Python Script                                   |
-| Policy Evaluator   | Python Script                                   |
-| PR Comment         | GitHub Script / GitHub API                      |
-| Deployment         | Docker Build, Staging Deploy                    |
+| 영역               | 기술                                                              |
+| ------------------ | ----------------------------------------------------------------- |
+| CI/CD              | GitHub Actions (Reusable Workflow)                                |
+| Container          | Docker                                                            |
+| SAST               | Semgrep (기본). CodeQL은 비교 검토 후 미선정                      |
+| Secret Scan        | Gitleaks                                                          |
+| Dependency Scan    | Trivy (CVE)                                                       |
+| SBOM               | CycloneDX (Trivy 생성)                                            |
+| DAST               | OWASP ZAP, Nuclei                                                 |
+| Runtime Validation | Health Check, Smoke Test, Security Header Check, 결과 정규화      |
+| Report Format      | JSON, SARIF, Markdown, HTML                                       |
+| Aggregator         | Python Script                                                     |
+| Policy Evaluator   | Python Script                                                     |
+| PR Comment         | GitHub Script / GitHub API                                        |
+| Deployment         | Docker Build, Staging Deploy                                      |
 
 ---
 
@@ -151,8 +155,8 @@ flowchart TD
 | ---------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | A. Platform / Pipeline             | GitHub Actions, PR 트리거, Aggregator 뼈대, Merge 차단, PR 댓글 자동화, CD Workflow, Docker Build/CD 연동 |
 | B. Application Security / Red Team | 앱 코드와 취약점 통합, 공격 PoC 작성 및 검증, 오탐/미탐 교차검증                                          |
-| C. Security Scan                   | SAST, Secret Scan, 의존성 검사 도구 셋업 및 튜닝, SARIF 출력                                              |
-| D. Runtime Validation              | DAST, 보안 헤더 검증, Health Check, Smoke Test, Staging 실행 환경                                         |
+| C. Security Scan                   | Semgrep/Gitleaks/Trivy 셋업·튜닝, SBOM(CycloneDX) 생성, 원본 JSON 연동                                    |
+| D. Runtime Validation              | ZAP·Nuclei DAST, 보안 헤더 검증, Health Check, Smoke Test, Staging 배포 후 검증                           |
 | E. AppSec / Policy / IR            | OWASP/CVSS 기준, 정책 룰, IR 플레이북, PR 댓글 수정 가이드 템플릿                                         |
 
 ---
@@ -181,8 +185,12 @@ A 파트는 전체 파이프라인의 중심 구조를 담당한다. 각 보안 
 ```text
 .github/
   workflows/
-    pr-security-gate.yml
+    pr-security-gate.yml          # reusable (workflow_call)
+    call-pr-security-gate.yml     # 이 저장소 PR용 caller
     cd-staging.yml
+
+examples/
+  caller-security-gate.yml        # 타 프로젝트 연동 템플릿
 
 security/
   reports/
@@ -203,6 +211,59 @@ docs/
   pipeline-guide.md
   team-interface.md
 ```
+
+---
+
+## 10.1 배포 및 타 프로젝트 연동
+
+Secure PR Gate의 “배포”는 다음을 의미한다.
+
+1. `pr-security-gate.yml`을 `workflow_call` reusable로 유지
+2. `v1` / `v1.x.y` Git 태그로 버전 고정
+3. 사용자 저장소에 caller workflow 추가 (`examples/caller-security-gate.yml` 참고)
+
+사용자 최소 준비물:
+
+- caller YAML (`on: pull_request` + `uses: ...@v1`)
+- (선택) 정책 파일
+- (선택, DAST) install/build/start 명령 또는 `target_url`
+
+### 10.2 SAST 도구 선정
+
+동일 대상(`web/`)에서 Semgrep과 CodeQL을 비교한 뒤 **Semgrep을 기본 SAST로 확정**했다.
+
+| 판단 기준 | 결과 |
+| --- | --- |
+| SQL Injection | 두 도구 모두 2건 탐지 |
+| Jinja `\| safe` XSS | Semgrep 4건 / CodeQL 0건 |
+| Open Redirect | CodeQL 1건 단독 탐지 |
+| Gate 연동 | Semgrep JSON 계약이 이미 적용됨. CodeQL은 SARIF 파서 추가 필요 |
+| 규칙 유지보수 | Semgrep YAML 커스텀이 팀에 유리 |
+
+CodeQL로 교체하지 않고 Semgrep을 고도화한다. CodeQL이 탐지한 Open Redirect는 Semgrep 커스텀 규칙으로 보완한다.  
+상세 근거: `docs/sast/sast-tool-selection-summary.md`
+
+### 10.3 의존성 검사와 SBOM
+
+| 산출물 | 역할 |
+| --- | --- |
+| Trivy CVE 보고서 | 무엇이 취약한가 (CVE, Severity, FixedVersion) |
+| CycloneDX SBOM | 무엇이 들어있는가 (Component, Version, PURL, 의존 관계) |
+
+같은 Trivy로 생성할 수 있지만 용도가 다르다. SBOM의 빈 `vulnerabilities[]`를 “취약점 없음”으로 해석하지 않는다.
+
+### 10.4 PR DAST와 Staging CD DAST
+
+DAST는 두 단계에서 목적과 환경이 다르다. 둘 다 활성화하면 검사가 두 번 실행될 수 있다.
+
+| 단계 | 환경 | 목적 | 상태 |
+| --- | --- | --- | --- |
+| PR Security Gate | GitHub runner-local 또는 지정 `target_url` | Merge 전 경량·선택적 동적 검사 (`enable_dast`) | runner-local 구조 지원 |
+| Staging CD | 실제 Staging 배포 환경 | 배포 후 Health Check / Smoke Test / DAST 재검증 | `cd-staging.yml` Placeholder |
+
+- PR 단계 DAST는 EC2 없이도 가능하다. runner에서 앱을 기동한 뒤 `localhost`를 대상으로 ZAP·Nuclei를 실행하는 방식을 기본 확장 경로로 둔다.
+- Staging CD는 `push to main` 이후 `cd-staging.yml`이 Docker Build → Staging Deploy → Post-deploy Validation을 수행하는 **목표 구조**다.
+- Runtime Validation의 `failed` 상태는 Aggregator·Policy Evaluator로 전달되고, Required Check 실패로 Merge를 차단하는 것이 최종 목표다.
 
 ---
 

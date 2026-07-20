@@ -1,44 +1,200 @@
 ---
 문서명: 파이프라인 운영 가이드
-최신화: 2026-06-30
+최신화: 2026-07-20
 작성자: 이윤재
-Version: 1.0.0
+Version: 1.2.0
 ---
 
 # Pipeline Guide
 
 ## 개요
 
-Secure PR Gate는 GitHub Actions 기반 DevSecOps 보안 게이트웨이 시스템이다.
-PR 생성 시 보안 검사를 자동 실행하고, 결과를 통합하여 Merge 가능 여부를 판단한다.
+Secure PR Gate는 GitHub Actions **Reusable Workflow** 기반 DevSecOps 보안 게이트웨이 시스템이다.
+사용자 프로젝트에서 PR이 생성되면 얇은 caller workflow가 Secure PR Gate를 호출하고, 보안 검사를 자동 실행한 뒤 Merge 가능 여부를 판단한다.
+
+---
+
+## Workflow vs Reusable Workflow
+
+| 항목 | Caller (일반 Workflow) | Reusable Workflow |
+| --- | --- | --- |
+| 파일 | `call-pr-security-gate.yml` 또는 사용자 `security-gate.yml` | `pr-security-gate.yml` |
+| 트리거 | `on: pull_request` | `on: workflow_call` |
+| 역할 | 언제 실행할지 결정, inputs 전달 | 보안 검사·Gate·PR 댓글 실행 |
+| 배포 | 사용자 저장소에 최소 파일 추가 | `uses: ...@v1` 로 버전 고정 호출 |
+
+```text
+사용자 PR 생성
+  -> 사용자 저장소 caller.yml (pull_request)
+  -> uses: KT-TECHUP-PROJECT5/secure_gate/.../pr-security-gate.yml@v1
+  -> SAST / Secret / Dependency / Runtime / Aggregate / Gate / PR Comment
+```
 
 ---
 
 ## Workflow 구성
 
-### 1. `pr-security-gate.yml` — PR 보안 게이트
+### 1. `pr-security-gate.yml` — Reusable 보안 게이트
+
+트리거: `workflow_call` (직접 실행되지 않음)
+
+| Job | 역할 | 상태 |
+| --- | --- | --- |
+| `build-test` | 빌드 및 테스트 | Placeholder |
+| `sast` | Semgrep 정적 분석 | 연동됨 |
+| `secret-scan` | Gitleaks 민감정보 탐지 | Placeholder (C파트 연결 예정) |
+| `dependency-scan` | Trivy 의존성 CVE 검사 | Placeholder (C파트 연결 예정) |
+| `runtime-validation` | Health Check / Smoke Test / DAST (ZAP·Nuclei) | inputs 기반 runner-local 지원 |
+| `aggregate-and-gate` | 결과 통합 및 Gate 판단 | 구현 완료 |
+| `pr-comment` | PR 댓글 작성 | 구현 완료 |
+
+### 2. `call-pr-security-gate.yml` — 이 저장소용 Caller
 
 트리거: `pull_request` → `main`, `develop`
 
-| Job                  | 역할                             | 상태                          |
-| -------------------- | -------------------------------- | ----------------------------- |
-| `build-test`         | 빌드 및 테스트                   | Placeholder                   |
-| `sast`               | Semgrep 정적 분석                | Placeholder (C파트 연결 예정) |
-| `secret-scan`        | Gitleaks 민감정보 탐지           | Placeholder (C파트 연결 예정) |
-| `dependency-scan`    | Trivy 의존성 CVE 검사            | Placeholder (C파트 연결 예정) |
-| `runtime-validation` | Health Check / Smoke Test / DAST | Placeholder (D파트 연결 예정) |
-| `aggregate-and-gate` | 결과 통합 및 Gate 판단           | 구현 완료                     |
-| `pr-comment`         | PR 댓글 작성                     | 구현 완료                     |
+이 저장소 PR에서 reusable workflow를 호출한다.
+`gate_ref`는 `${{ github.sha }}`로 두어, 태그 없이도 PR 커밋의 scripts를 사용한다.
 
-### 2. `cd-staging.yml` — Staging 배포
+### 3. `cd-staging.yml` — Staging 배포
 
 트리거: `push` → `main`
 
-| Job                      | 역할               | 상태                          |
-| ------------------------ | ------------------ | ----------------------------- |
-| `docker-build`           | Docker 이미지 빌드 | Placeholder (4차 구현)        |
-| `staging-deploy`         | Staging 환경 배포  | Placeholder (4차 구현)        |
-| `post-deploy-validation` | 배포 후 검증       | Placeholder (D파트 연결 예정) |
+| Job | 역할 | 상태 |
+| --- | --- | --- |
+| `docker-build` | Docker 이미지 빌드 | Placeholder (4차 구현) |
+| `staging-deploy` | Staging 환경 배포 | Placeholder (4차 구현) |
+| `post-deploy-validation` | 배포 후 Health Check / Smoke Test / DAST | Placeholder (D파트 연결 예정) |
+
+### 4. PR DAST와 Staging CD DAST 역할 구분
+
+DAST는 PR Gate와 Staging CD에서 목적이 다르다. `enable_dast=true`이고 Staging 배포 후에도 DAST를 돌리면 검사가 두 번 실행될 수 있다.
+
+| 구분 | PR Security Gate | Staging CD (`cd-staging.yml`) |
+| --- | --- | --- |
+| 트리거 | `pull_request` | `push` → `main` |
+| 환경 | runner-local 또는 `target_url` | 실제 Staging 배포 환경 |
+| 목적 | Merge 전 선택적·경량 동적 검사 | 배포 후 환경·헤더·프록시까지 포함한 재검증 |
+| 도구 | ZAP, Nuclei, 직접 보안 헤더 검사 | Health Check, Smoke Test, DAST |
+| 기본값 | `enable_dast: false` (선택) | 목표 구조, 현재 Placeholder |
+| 결과 처리 | `runtime-report.json` → Aggregator → Policy Evaluator → Required Check | 배포 성공/중단·Rollback 판단 |
+
+PR 단계에서는 시간을 고려해 Baseline·제한 심각도 중심의 검사를 두고, 전체 검증은 Staging 배포 후에 수행하는 구성을 권장한다.
+
+---
+
+## 다른 프로젝트에서 사용하기
+
+### 최소 준비물
+
+1. `.github/workflows/security-gate.yml` 추가  
+   → 템플릿: [`examples/caller-security-gate.yml`](../examples/caller-security-gate.yml)
+2. (선택) `security/policies/security-gate-policy.json` — 없으면 Secure Gate 기본 정책 사용
+3. (선택, DAST) `install_command` / `build_command` / `start_command` / `app_port` / `health_path`  
+   또는 이미 떠 있는 `target_url`
+4. Branch Protection에서 Secure PR Gate Check를 Required로 설정
+
+EC2나 Staging 서버는 **필수가 아니다.**  
+기본은 GitHub Actions runner에서 앱을 기동하는 `runner-local` 방식이다.
+
+### Caller 예시
+
+```yaml
+name: Secure PR Gate
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+  security-events: write
+
+jobs:
+  secure-pr-gate:
+    uses: KT-TECHUP-PROJECT5/secure_gate/.github/workflows/pr-security-gate.yml@v1
+    with:
+      gate_repository: KT-TECHUP-PROJECT5/secure_gate
+      gate_ref: v1
+      enable_dast: true
+      install_command: npm ci
+      build_command: npm run build
+      start_command: npm start
+      app_port: "3000"
+      health_path: /health
+    secrets: inherit
+```
+
+### Inputs 계약
+
+| Input | 기본값 | 설명 |
+| --- | --- | --- |
+| `gate_repository` | `KT-TECHUP-PROJECT5/secure_gate` | scripts/정책이 있는 저장소 |
+| `gate_ref` | `v1` | tooling checkout ref/tag |
+| `enable_dast` | `false` | PR 단계 DAST 실행 여부 (Staging CD DAST와 별개) |
+| `install_command` | `""` | 예: `npm ci` |
+| `build_command` | `""` | 예: `npm run build` |
+| `start_command` | `""` | 예: `npm start` (백그라운드 기동) |
+| `app_port` | `3000` | runner-local 포트 |
+| `health_path` | `/health` | readiness 경로 |
+| `target_url` | `""` | 외부 Preview/Staging URL (있으면 localhost 대신 사용) |
+| `policy_path` | `""` | caller 정책 경로 (비어 있으면 기본/로컬 정책) |
+| `node_version` | `20` | Node 기반 install/build/start 시 사용 |
+
+### Secrets
+
+| Secret | 필수 | 설명 |
+| --- | --- | --- |
+| `GITHUB_TOKEN` | 자동 | PR 댓글용 (`secrets: inherit` 권장) |
+| `DYNATRACE_TOKEN` | 선택 | Dynatrace 확장용 (미구현 placeholder) |
+
+---
+
+## 스크립트 checkout 방식
+
+Reusable job의 기본 `actions/checkout`은 **caller(사용자) 저장소**를 받는다.  
+Aggregator / Evaluator / PR Comment 스크립트는 Secure Gate 저장소를 `.secure-gate/`에 추가 checkout한다.
+
+```text
+workspace/
+  <caller source>          # SAST 등 검사 대상
+  .secure-gate/scripts/    # aggregate / evaluate / create-pr-comment
+  security/reports/        # 결과 파일
+```
+
+정책 우선순위:
+
+1. `inputs.policy_path`가 가리키는 파일
+2. caller의 `security/policies/security-gate-policy.json`
+3. `.secure-gate/security/policies/security-gate-policy.json`
+
+---
+
+## 버전 배포 (`@v1`)
+
+Secure PR Gate는 서버 배포가 아니라 **Git 태그로 Reusable Workflow를 배포**한다.
+
+```bash
+# 릴리즈 예시 (maintainers)
+git tag v1.0.0
+git push origin v1.0.0
+
+# major 이동 태그 (사용자가 @v1 로 따라가도록)
+git tag -f v1 v1.0.0
+git push origin v1 --force
+```
+
+사용자 프로젝트는 다음처럼 고정한다.
+
+```yaml
+uses: KT-TECHUP-PROJECT5/secure_gate/.github/workflows/pr-security-gate.yml@v1
+# 또는 완전 고정:
+# uses: .../pr-security-gate.yml@v1.0.0
+```
+
+`with.gate_ref`도 동일한 태그(`v1` 또는 `v1.0.0`)로 맞춘다.  
+워크플로우 YAML과 scripts가 같은 버전에서 오도록 하기 위함이다.
 
 ---
 
@@ -46,20 +202,19 @@ PR 생성 시 보안 검사를 자동 실행하고, 결과를 통합하여 Merge
 
 ```text
 security/reports/
-  build-report.json         # Build/Test 결과
-  sast-report.json          # SAST 결과 (C파트)
-  secret-report.json        # Secret Scan 결과 (C파트)
-  dependency-report.json    # Dependency Scan 결과 (C파트)
-  runtime-report.json       # Runtime Validation 결과 (D파트)
-  security-summary.json     # Aggregator 통합 결과
-  gate-decision.json        # Gate Evaluator 판단 결과
+  build-report.json
+  sast-report.json
+  secret-report.json
+  dependency-report.json
+  runtime-report.json
+  zap-report.json           # enable_dast 시 (선택)
+  security-summary.json
+  gate-decision.json
 ```
 
 ---
 
 ## 결과 파일 공통 스키마
-
-각 보안 검사 파트는 아래 형식을 준수해야 한다.
 
 ```json
 {
@@ -83,13 +238,15 @@ security/reports/
 
 `security/policies/security-gate-policy.json`에서 관리한다.
 
-| 조건          | 처리         |
-| ------------- | ------------ |
-| Critical 탐지 | Merge 차단   |
-| High 탐지     | Merge 차단   |
-| Secret 탐지   | Merge 차단   |
-| Medium 탐지   | PR 댓글 경고 |
-| 모두 통과     | Merge 허용   |
+| 조건 | 처리 |
+| --- | --- |
+| Critical 탐지 | Merge 차단 |
+| High 탐지 | Merge 차단 |
+| Secret 탐지 | Merge 차단 |
+| Medium 탐지 | PR 댓글 경고 |
+| 모두 통과 | Merge 허용 |
+
+환경변수 `SECURE_GATE_POLICY`로 정책 파일 경로를 오버라이드할 수 있다.
 
 ---
 
@@ -99,15 +256,14 @@ security/reports/
 2. `aggregate-and-gate` Job 실패 → GitHub Check 실패
 3. Branch Protection Rule에서 해당 Check를 Required로 설정 → Merge 버튼 비활성화
 
-> Branch Protection Rule 설정은 레포지터리 관리자가 수행해야 한다.
 > Settings → Branches → Branch protection rules → Require status checks
 
 ---
 
 ## 스크립트
 
-| 파일                           | 역할                      |
-| ------------------------------ | ------------------------- |
-| `scripts/aggregate-results.py` | 각 보안 결과 파일 통합    |
-| `scripts/evaluate-gate.py`     | 정책 기준 Pass/Fail 판단  |
+| 파일 | 역할 |
+| --- | --- |
+| `scripts/aggregate-results.py` | 각 보안 결과 파일 통합 |
+| `scripts/evaluate-gate.py` | 정책 기준 Pass/Fail 판단 |
 | `scripts/create-pr-comment.py` | GitHub API로 PR 댓글 작성 |

@@ -1,16 +1,69 @@
-name: PR Security Gate
+name: Secure PR Gate
 
+# Reusable workflow — 다른 저장소(또는 이 저장소의 caller)가 uses: 로 호출한다.
+# 스스로 pull_request 이벤트를 받지 않는다.
 on:
-  pull_request:
-    branches:
-      - main
-      - develop
-
-permissions:
-  contents: read
-  pull-requests: write
-  checks: write
-  security-events: write
+  workflow_call:
+    inputs:
+      gate_repository:
+        description: Secure PR Gate tooling repository (scripts, default policy)
+        type: string
+        required: false
+        default: "KT-TECHUP-PROJECT5/secure_gate"
+      gate_ref:
+        description: Ref/tag of Secure PR Gate tooling to checkout
+        type: string
+        required: false
+        default: "v1"
+      enable_dast:
+        description: Run DAST against a started app (requires start_command or target_url)
+        type: boolean
+        required: false
+        default: false
+      install_command:
+        description: Dependency install command for runner-local runtime (e.g. npm ci)
+        type: string
+        required: false
+        default: ""
+      build_command:
+        description: Build command for runner-local runtime (e.g. npm run build)
+        type: string
+        required: false
+        default: ""
+      start_command:
+        description: Start command for runner-local runtime (e.g. npm start)
+        type: string
+        required: false
+        default: ""
+      app_port:
+        description: Port where the app listens in runner-local mode
+        type: string
+        required: false
+        default: "3000"
+      health_path:
+        description: Health check path
+        type: string
+        required: false
+        default: "/health"
+      target_url:
+        description: External Preview/Staging URL for DAST (overrides localhost when set)
+        type: string
+        required: false
+        default: ""
+      policy_path:
+        description: Policy file path relative to caller repo (empty = use Secure Gate default)
+        type: string
+        required: false
+        default: ""
+      node_version:
+        description: Node.js version when install/build/start commands are used
+        type: string
+        required: false
+        default: "20"
+    secrets:
+      DYNATRACE_TOKEN:
+        description: Optional Dynatrace API token for runtime observability (extension)
+        required: false
 
 jobs:
   # ──────────────────────────────────────────
@@ -20,11 +73,15 @@ jobs:
     name: Build / Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout caller repository
+        uses: actions/checkout@v4
 
       - name: "[Placeholder] Build and Test"
         run: |
           echo "Build and Test placeholder - replace with actual build/test commands"
+          if [ -n "${{ inputs.build_command }}" ]; then
+            echo "Configured build_command: ${{ inputs.build_command }}"
+          fi
           mkdir -p security/reports
           cat > security/reports/build-report.json <<'EOF'
           {
@@ -41,81 +98,131 @@ jobs:
           path: security/reports/build-report.json
 
   # ──────────────────────────────────────────
-  # 2. SAST (Semgrep) - C파트 연결 예정
+  # 2. SAST (Semgrep) - C파트
   # ──────────────────────────────────────────
   sast:
     name: SAST (Semgrep)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout caller repository
+        uses: actions/checkout@v4
 
-      - name: "[Placeholder] SAST Scan"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Semgrep
+        run: python -m pip install semgrep==1.168.0
+
+      - name: Run Semgrep
+        id: semgrep-scan
+        continue-on-error: true
         run: |
-          echo "SAST placeholder - C파트의 Semgrep 명령어로 교체 예정"
           mkdir -p security/reports
-          cat > security/reports/sast-report.json <<'EOF'
-          {
-            "status": "passed",
-            "tool": "semgrep",
-            "findings": []
-          }
-          EOF
+          semgrep scan \
+            --config auto \
+            --config r/python.flask.security.xss.audit.template-unescaped-with-safe.template-unescaped-with-safe \
+            . \
+            --json \
+            --output security/reports/sast-report.json
+
+      - name: Validate Semgrep report
+        run: |
+          python -c 'import json; data=json.load(open("security/reports/sast-report.json")); assert isinstance(data.get("results"), list); assert isinstance(data.get("errors"), list)'
 
       - name: Upload SAST report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sast-report
           path: security/reports/sast-report.json
 
   # ──────────────────────────────────────────
-  # 3. Secret Scan (Gitleaks) - C파트 연결 예정
+  # 3. Secret Scan (Gitleaks) - C파트
   # ──────────────────────────────────────────
   secret-scan:
     name: Secret Scan (Gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout caller repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: "[Placeholder] Secret Scan"
+      - name: Install Gitleaks
         run: |
-          echo "Secret Scan placeholder - C파트의 Gitleaks 명령어로 교체 예정"
+          GITLEAKS_VERSION="8.30.1"
+          curl --fail --silent --show-error --location \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            --output /tmp/gitleaks.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz" | sha256sum --check
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo install /tmp/gitleaks /usr/local/bin/gitleaks
+
+      - name: Run Gitleaks
+        id: gitleaks-scan
+        continue-on-error: true
+        run: |
           mkdir -p security/reports
-          cat > security/reports/secret-report.json <<'EOF'
-          {
-            "status": "passed",
-            "tool": "gitleaks",
-            "findings": []
-          }
-          EOF
+          gitleaks git . \
+            --report-format json \
+            --report-path security/reports/secret-report.json \
+            --redact=100 \
+            --exit-code 0 \
+            --no-banner
+
+      - name: Validate Gitleaks report
+        run: |
+          python3 -c 'import json; data=json.load(open("security/reports/secret-report.json")); assert isinstance(data, list)'
 
       - name: Upload secret scan report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: secret-report
           path: security/reports/secret-report.json
 
   # ──────────────────────────────────────────
-  # 4. Dependency Scan (Trivy) - C파트 연결 예정
+  # 4. Dependency Scan (Trivy) - C파트
   # ──────────────────────────────────────────
   dependency-scan:
     name: Dependency Scan (Trivy)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout caller repository
+        uses: actions/checkout@v4
 
-      - name: "[Placeholder] Dependency Scan"
+      - name: Install Trivy
         run: |
-          echo "Dependency Scan placeholder - C파트의 Trivy 명령어로 교체 예정"
+          TRIVY_VERSION="0.70.0"
+          curl --fail --silent --show-error --location \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
+            --output /tmp/trivy.tar.gz
+          echo "8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9  /tmp/trivy.tar.gz" | sha256sum --check
+          tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
+          sudo install /tmp/trivy /usr/local/bin/trivy
+
+      - name: Run Trivy
+        id: trivy-scan
+        continue-on-error: true
+        run: |
           mkdir -p security/reports
-          cat > security/reports/dependency-report.json <<'EOF'
-          {
-            "status": "passed",
-            "tool": "trivy",
-            "findings": []
-          }
-          EOF
+          trivy fs \
+            --scanners vuln \
+            --file-patterns "pip:requirements-legacy.txt" \
+            --format json \
+            --output security/reports/dependency-report.json \
+            --exit-code 0 \
+            --no-progress \
+            .
+
+      - name: Validate Trivy report
+        run: |
+          python3 -c 'import json; data=json.load(open("security/reports/dependency-report.json")); assert isinstance(data, dict); assert data.get("SchemaVersion") == 2'
 
       - name: Upload dependency scan report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: dependency-report
@@ -128,25 +235,125 @@ jobs:
     name: Runtime Validation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout caller repository
+        uses: actions/checkout@v4
 
-      - name: "[Placeholder] Runtime Validation"
+      - name: Set up Node.js
+        if: inputs.install_command != '' || inputs.build_command != '' || inputs.start_command != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - name: Install dependencies
+        if: inputs.install_command != ''
+        run: ${{ inputs.install_command }}
+
+      - name: Build application
+        if: inputs.build_command != ''
+        run: ${{ inputs.build_command }}
+
+      - name: Start application (runner-local)
+        if: inputs.start_command != ''
         run: |
-          echo "Runtime Validation placeholder - D파트와 연결 예정"
+          set -euo pipefail
+          ${{ inputs.start_command }} &
+          echo $! > /tmp/secure-gate-app.pid
+          TARGET="http://127.0.0.1:${{ inputs.app_port }}${{ inputs.health_path }}"
+          echo "Waiting for app at ${TARGET}"
+          for i in $(seq 1 30); do
+            if curl -fsS "$TARGET" >/dev/null 2>&1; then
+              echo "App is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "App did not become ready in time"
+          exit 1
+
+      - name: Resolve DAST target URL
+        id: dast-target
+        run: |
+          if [ -n "${{ inputs.target_url }}" ]; then
+            echo "url=${{ inputs.target_url }}" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ inputs.start_command }}" ]; then
+            echo "url=http://127.0.0.1:${{ inputs.app_port }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "url=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run DAST (OWASP ZAP baseline)
+        if: inputs.enable_dast && steps.dast-target.outputs.url != ''
+        continue-on-error: true
+        run: |
+          set -euo pipefail
           mkdir -p security/reports
-          cat > security/reports/runtime-report.json <<'EOF'
+          TARGET_URL="${{ steps.dast-target.outputs.url }}"
+          echo "Running ZAP baseline against ${TARGET_URL}"
+          docker run --rm --network host \
+            -v "${{ github.workspace }}/security/reports:/zap/wrk:rw" \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t "${TARGET_URL}" -J zap-report.json -I || true
+          if [ -f security/reports/zap-report.json ]; then
+            echo "ZAP report written"
+          else
+            echo '{"site":[],"note":"zap report missing"}' > security/reports/zap-report.json
+          fi
+
+      - name: Write runtime report
+        if: always()
+        run: |
+          mkdir -p security/reports
+          ENABLE_DAST="${{ inputs.enable_dast }}"
+          TARGET_URL="${{ steps.dast-target.outputs.url }}"
+          if [ "$ENABLE_DAST" = "true" ] && [ -n "$TARGET_URL" ]; then
+            cat > security/reports/runtime-report.json <<EOF
           {
             "status": "passed",
             "tool": "runtime-validation",
-            "findings": []
+            "findings": [],
+            "meta": {
+              "enable_dast": true,
+              "target_url": "${TARGET_URL}",
+              "mode": "runner-local-or-external",
+              "dynatrace": "optional-extension-not-run"
+            }
           }
           EOF
+          else
+            cat > security/reports/runtime-report.json <<'EOF'
+          {
+            "status": "passed",
+            "tool": "runtime-validation",
+            "findings": [],
+            "meta": {
+              "enable_dast": false,
+              "note": "Placeholder or DAST disabled — provide start_command/target_url and enable_dast=true"
+            }
+          }
+          EOF
+          fi
+
+      - name: Stop application
+        if: always() && inputs.start_command != ''
+        run: |
+          if [ -f /tmp/secure-gate-app.pid ]; then
+            kill "$(cat /tmp/secure-gate-app.pid)" 2>/dev/null || true
+          fi
 
       - name: Upload runtime validation report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: runtime-report
           path: security/reports/runtime-report.json
+
+      - name: Upload ZAP report
+        if: always() && inputs.enable_dast
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: security/reports/zap-report.json
+          if-no-files-found: ignore
 
   # ──────────────────────────────────────────
   # 6. Aggregate & Gate Evaluation
@@ -156,7 +363,15 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-test, sast, secret-scan, dependency-scan, runtime-validation]
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout caller repository
+        uses: actions/checkout@v4
+
+      - name: Checkout Secure Gate tooling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.gate_repository }}
+          ref: ${{ inputs.gate_ref }}
+          path: .secure-gate
 
       - name: Download all scan reports
         uses: actions/download-artifact@v4
@@ -164,17 +379,33 @@ jobs:
           path: .
           merge-multiple: true
 
+      - name: Resolve policy file
+        id: policy
+        run: |
+          set -euo pipefail
+          CALLER_POLICY="${{ inputs.policy_path }}"
+          DEFAULT_POLICY=".secure-gate/security/policies/security-gate-policy.json"
+          if [ -n "$CALLER_POLICY" ] && [ -f "$CALLER_POLICY" ]; then
+            echo "path=${CALLER_POLICY}" >> "$GITHUB_OUTPUT"
+          elif [ -f "security/policies/security-gate-policy.json" ]; then
+            echo "path=security/policies/security-gate-policy.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=${DEFAULT_POLICY}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Run Aggregator
-        run: python scripts/aggregate-results.py
+        run: python .secure-gate/scripts/aggregate-results.py
 
       - name: Run Gate Evaluator
         id: gate-eval
-        run: python scripts/evaluate-gate.py
+        env:
+          SECURE_GATE_POLICY: ${{ steps.policy.outputs.path }}
+        run: python .secure-gate/scripts/evaluate-gate.py
         continue-on-error: true
 
       - name: Upload gate results
@@ -201,7 +432,15 @@ jobs:
     needs: aggregate-and-gate
     if: always()
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout caller repository
+        uses: actions/checkout@v4
+
+      - name: Checkout Secure Gate tooling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.gate_repository }}
+          ref: ${{ inputs.gate_ref }}
+          path: .secure-gate
 
       - name: Download gate decision
         uses: actions/download-artifact@v4
@@ -220,4 +459,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
-        run: python scripts/create-pr-comment.py
+        run: python .secure-gate/scripts/create-pr-comment.py

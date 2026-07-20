@@ -14,12 +14,19 @@ E 파트의 정책이 확정되면 해당 파일만 업데이트하면 된다.
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
 REPORTS_DIR   = Path("security/reports")
 SUMMARY_FILE  = REPORTS_DIR / "security-summary.json"
-POLICY_FILE   = Path("security/policies/security-gate-policy.json")
+# Caller may override via SECURE_GATE_POLICY (absolute or relative path).
+POLICY_FILE   = Path(
+    os.environ.get(
+        "SECURE_GATE_POLICY",
+        "security/policies/security-gate-policy.json",
+    )
+)
 DECISION_FILE = REPORTS_DIR / "gate-decision.json"
 
 
