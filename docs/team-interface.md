@@ -1,8 +1,8 @@
 ---
 문서명: 프로젝트 협업용 가이드
-최신화: 2026-06-30
+최신화: 2026-07-20
 작성자: 이윤재
-Version: 1.1.0
+Version: 1.2.0
 ---
 
 # Team Interface — A 파트 연동 가이드
@@ -19,8 +19,10 @@ Notion에 작업 내용 요약과 Workflow Job 등록 정보를 기록한 뒤 PR
    예) feat/c-sast, feat/d-runtime, feat/e-policy
 
 2. 작업 수행
-   - pr-security-gate.yml의 해당 Placeholder Job을 실제 명령어로 교체
+   - `pr-security-gate.yml`(reusable)의 해당 Placeholder Job을 실제 명령어로 교체
+   - 이 저장소 검증은 `call-pr-security-gate.yml` caller를 통해 실행된다
    - 결과 파일이 공통 스키마를 준수하는지 로컬에서 확인
+   - 타 프로젝트 연동 변경 시 `examples/caller-security-gate.yml`도 함께 갱신
 
 3. Notion에 작업 내용 기록 (아래 양식 참고)
 
@@ -106,6 +108,7 @@ steps:
 
 | 항목                           | 내용                                      | 상태       |
 | ------------------------------ | ----------------------------------------- | ---------- |
+| SAST 기본 도구                 | Semgrep (CodeQL 비교 후 미선정)           | 확정       |
 | Semgrep 실행 명령어            | `semgrep scan --config auto . --json --output security/reports/sast-report.json` | 확정       |
 | Semgrep 설정 파일 경로         | 별도 파일 없음 (`--config auto`)                                                | 초기 확정  |
 | SAST 결과 파일 경로            | `security/reports/sast-report.json`                                             | A파트 고정 |
@@ -113,8 +116,10 @@ steps:
 | Secret Scan 결과 파일 경로     | `security/reports/secret-report.json`     | A파트 고정 |
 | Trivy 실행 명령어              | `trivy fs --scanners vuln --file-patterns "pip:requirements-legacy.txt" --format json --output security/reports/dependency-report.json --exit-code 0 --no-progress .` | 확정       |
 | Dependency Scan 결과 파일 경로 | `security/reports/dependency-report.json` | A파트 고정 |
+| SBOM 형식                      | CycloneDX (Trivy 생성, CVE 보고서와 역할 분리) | 확정    |
 | 각 도구의 실패 기준            | 결과 파일 미생성 또는 유효하지 않은 JSON | 초기 확정  |
 | 출력 형식                      | 도구별 원본 JSON                         | 확정       |
+| 선정 근거 문서                 | `docs/sast/sast-tool-selection-summary.md` | 확정     |
 
 ---
 
@@ -122,14 +127,18 @@ steps:
 
 | 항목                              | 내용                                   | 상태       |
 | --------------------------------- | -------------------------------------- | ---------- |
-| Staging 실행 방식                 |                                        | 미확정     |
+| PR 단계 DAST 환경                 | runner-local 또는 `target_url` (`enable_dast`) | 확정 방향 |
+| Staging CD 실행 방식              | `push main` → `cd-staging.yml` (Build/Deploy/Post-deploy) | 목표 확정 / 구현 Placeholder |
 | Staging URL                       |                                        | 미확정     |
 | Health Check Endpoint             |                                        | 미확정     |
 | Smoke Test 실행 명령어            |                                        | 미확정     |
+| DAST 도구                         | OWASP ZAP + Nuclei                     | 확정       |
 | ZAP 실행 명령어                   |                                        | 미확정     |
+| Nuclei 실행 명령어                | Docker 기반 JSONL 출력 (D파트 Workflow 연동) | 진행 중 |
 | Runtime Validation 결과 파일 경로 | `security/reports/runtime-report.json` | A파트 고정 |
-| 보안 헤더 검증 기준               |                                        | 미확정     |
-| Runtime Validation 실패 기준      |                                        | 미확정     |
+| 보안 헤더 검증 기준               | CSP, X-Frame-Options, X-Content-Type-Options 등 | 초기 확정 |
+| Runtime Validation 실패 기준      | 통합 finding의 Critical/High → Policy Evaluator | 확정 방향 |
+| PR DAST vs CD DAST                | PR=선택적 경량 검사, Staging=배포 후 재검증 | 확정 |
 
 ---
 

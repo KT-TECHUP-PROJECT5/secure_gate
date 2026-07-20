@@ -19,6 +19,7 @@ Version: 1.0.0
 - [x] `.github/workflows/pr-security-gate.yml` 생성
 - [x] PR 트리거 설정 (`pull_request` → `main`, `develop`)
 - [x] 기본 권한 설정 (`contents`, `pull-requests`, `checks`, `security-events`)
+- [x] Reusable Workflow 전환 (`workflow_call` + 이 저장소 caller 분리)
 
 ### Placeholder Job 구성
 

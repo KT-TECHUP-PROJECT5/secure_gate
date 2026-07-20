@@ -1,0 +1,32 @@
+name: Call Secure PR Gate
+
+# 이 저장소의 PR에서 reusable workflow를 호출하는 얇은 caller.
+# 다른 프로젝트는 examples/caller-security-gate.yml 을 참고해 동일 패턴으로 연동한다.
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+  security-events: write
+
+jobs:
+  secure-pr-gate:
+    uses: ./.github/workflows/pr-security-gate.yml
+    with:
+      # 개발/PR 검증: 워크플로우와 동일한 커밋의 scripts/policy 사용
+      gate_repository: ${{ github.repository }}
+      gate_ref: ${{ github.sha }}
+      enable_dast: false
+      # runner-local DAST 예시 (앱 기동 명령이 있을 때 활성화):
+      # enable_dast: true
+      # install_command: npm ci
+      # build_command: npm run build
+      # start_command: npm start
+      # app_port: "3000"
+      # health_path: /health
+    secrets: inherit
