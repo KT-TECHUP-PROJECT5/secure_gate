@@ -82,6 +82,7 @@ security/reports/
 ## Gate 정책
 
 `security/policies/security-gate-policy.json`에서 관리한다.
+등급 산정 근거·OWASP/CVSS 기준·도구별 매핑은 [취약점 등급 기준 문서](./severity-policy.md)를 참고한다.
 
 | 조건          | 처리         |
 | ------------- | ------------ |
@@ -89,7 +90,10 @@ security/reports/
 | High 탐지     | Merge 차단   |
 | Secret 탐지   | Merge 차단   |
 | Medium 탐지   | PR 댓글 경고 |
+| Low 탐지      | 기록만       |
 | 모두 통과     | Merge 허용   |
+
+보안 이벤트 발생 시 대응 절차는 [Incident Response 플레이북](./incident-response-playbook.md)을 따른다.
 
 ---
 
@@ -106,8 +110,14 @@ security/reports/
 
 ## 스크립트
 
-| 파일                           | 역할                      |
-| ------------------------------ | ------------------------- |
-| `scripts/aggregate-results.py` | 각 보안 결과 파일 통합    |
-| `scripts/evaluate-gate.py`     | 정책 기준 Pass/Fail 판단  |
-| `scripts/create-pr-comment.py` | GitHub API로 PR 댓글 작성 |
+| 파일                           | 역할                            |
+| ------------------------------ | ------------------------------- |
+| `scripts/aggregate-results.py` | 각 보안 결과 파일 통합          |
+| `scripts/evaluate-gate.py`     | 정책 기준 Pass/Fail 판단        |
+| `scripts/create-pr-comment.py` | GitHub API로 PR 댓글 작성       |
+| `scripts/sbom-extract-purls.py`| SBOM에서 패키지(purl) 추출      |
+| `scripts/osv-query.py`         | OSV로 CVE 조회                  |
+| `scripts/cve-risk-assess.py`   | CVE dedup + EPSS/KEV 데이터 수집 |
+| `scripts/cve-policy-evaluate.py`| CVE 위험도 최종 판정 (CVSS/EPSS/KEV) |
+
+> CVE 심화 정책의 판정 기준은 [등급 기준 문서](./severity-policy.md) 5절 참고.

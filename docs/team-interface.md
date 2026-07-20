@@ -135,14 +135,16 @@ steps:
 
 ## E 파트: AppSec / Policy / IR
 
-| 항목                       | 내용                                             | 상태        |
-| -------------------------- | ------------------------------------------------ | ----------- |
-| Merge 차단 기준            | Critical / High / Secret (초기 정책 적용 중)     | 초기값 적용 |
-| Warning 처리 기준          | Medium (초기 정책 적용 중)                       | 초기값 적용 |
-| CVSS 등급 기준             |                                                  | 미확정      |
-| 도구별 Severity 매핑 기준  |                                                  | 미확정      |
-| PR 댓글 수정 가이드 템플릿 | `security/templates/pr-comment-template.md` 참고 | 미확정      |
-| IR 플레이북 연결 기준      |                                                  | 미확정      |
+| 항목                       | 내용                                                                 | 상태   |
+| -------------------------- | -------------------------------------------------------------------- | ------ |
+| Merge 차단 기준            | Critical / High / Secret → 차단 (`gateRules.blockOnSeverity`)         | 확정   |
+| Warning 처리 기준          | Medium → PR 경고 (`gateRules.warnOnSeverity`)                        | 확정   |
+| CVSS 등급 기준             | `docs/severity-policy.md` 1절 (CVSS v3.1 점수 구간 ↔ 공통 등급)      | 확정   |
+| 도구별 Severity 매핑 기준  | `docs/severity-policy.md` 3절 · `security-gate-policy.json`          | 확정   |
+| 수정 가이드                | `security/policies/remediation-guide.json` (카테고리별, PR 댓글 주입) | 확정   |
+| PR 댓글 수정 가이드 템플릿 | `security/templates/pr-comment-template.md` (실제 출력과 동기화)     | 확정   |
+| CVE 심화 정책 (CVSS/EPSS/KEV) | `scripts/cve-policy-evaluate.py` · `docs/severity-policy.md` 5절   | 확정   |
+| IR 플레이북                | `docs/incident-response-playbook.md` (SEC-01~05)                    | 확정   |
 
 ---
 

@@ -92,9 +92,11 @@ Version: 1.0.0
 
 ### E파트 연결
 
-- [ ] CVSS / 도구별 Severity 매핑 기준 반영 (`evaluate-gate.py`)
-- [ ] E파트 PR 댓글 수정 가이드 템플릿 반영 (`create-pr-comment.py`)
-- [ ] `security-gate-policy.json` 세분화 업데이트
+- [x] CVSS / 도구별 Severity 매핑 기준 반영 (`evaluate-gate.py` — `severityMapping` 기반 정규화)
+- [x] E파트 PR 댓글 수정 가이드 템플릿 반영 (`create-pr-comment.py` — `remediation-guide.json` 주입)
+- [x] `security-gate-policy.json` 세분화 업데이트 (v2.0)
+- [x] 등급 기준 문서 작성 (`docs/severity-policy.md`)
+- [x] IR 플레이북 작성 (`docs/incident-response-playbook.md`)
 
 ### Merge 차단 확정
 

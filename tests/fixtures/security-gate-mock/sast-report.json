@@ -1,0 +1,20 @@
+{
+  "status": "failed",
+  "tool": "semgrep",
+  "findings": [
+    {
+      "id": "SEMGREP-001",
+      "severity": "ERROR",
+      "title": "SQL Injection 가능성 있는 쿼리 조합",
+      "description": "사용자 입력이 이스케이프 없이 쿼리 문자열에 직접 삽입됩니다.",
+      "location": "src/app.py:42"
+    },
+    {
+      "id": "SEMGREP-002",
+      "severity": "WARNING",
+      "title": "잠재적 XSS 취약점",
+      "description": "사용자 입력값이 검증 없이 응답에 그대로 반영됩니다.",
+      "location": "src/views.py:10"
+    }
+  ]
+}

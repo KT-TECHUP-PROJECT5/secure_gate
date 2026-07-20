@@ -51,6 +51,55 @@ def report_row(label: str, report: dict) -> str:
         return f"| {label} | ❌ Failed | {count}건 |"
 
 
+def finding_guide_block(finding: dict) -> str:
+    icon     = "❌" if finding.get("blocking") else "⚠️"
+    severity = (finding.get("severity") or "").capitalize()
+    title    = finding.get("title") or "(제목 없음)"
+    tool     = finding.get("tool", "-")
+    location = finding.get("location") or "-"
+    guide    = finding.get("guide") or {}
+
+    lines = [f"#### {icon} [{severity}] {title} ({tool})", f"- 위치: `{location}`"]
+
+    if guide.get("summary"):
+        lines.append(f"- {guide['summary']}")
+    if guide.get("recommendation"):
+        lines.append(f"- **조치**: {guide['recommendation']}")
+    if guide.get("reference"):
+        lines.append(f"- 참고: {guide['reference']}")
+    if finding.get("severity_fallback"):
+        lines.append(
+            f"- ⚠️ 원본 값 `{finding.get('original_severity')}`이(가) 정책에 매핑되어 있지 않아 "
+            f"임시로 `{finding.get('severity')}`로 처리되었습니다."
+        )
+
+    return "\n".join(lines)
+
+
+def build_guide_section(decision: dict) -> str:
+    findings = decision.get("findings")
+
+    # 구버전 gate-decision.json(findings 필드 없음)과의 하위 호환:
+    # 차단/경고 사유는 있는데 finding 상세가 없으면 기존 안내 문구만 보여준다.
+    if findings is None:
+        if decision.get("block_reasons") or decision.get("warnings"):
+            return (
+                "\n### 수정 가이드\n\n"
+                "- 수정 후 다시 push하면 Security Gate가 재실행됩니다.\n"
+            )
+        return ""
+
+    relevant = [f for f in findings if f.get("blocking") or f.get("warning")]
+    if not relevant:
+        return ""
+
+    blocks = "\n\n".join(finding_guide_block(f) for f in relevant)
+    return (
+        f"\n### 수정 가이드\n\n{blocks}\n\n"
+        f"수정 후 다시 push하면 Security Gate가 재실행됩니다.\n"
+    )
+
+
 def build_comment(decision: dict | None) -> str:
     if decision is None:
         return (
@@ -82,12 +131,7 @@ def build_comment(decision: dict | None) -> str:
         items = "\n".join(f"- {w}" for w in warnings)
         warning_section = f"\n### 경고\n\n{items}\n"
 
-    guide_section = (
-        "\n### 수정 가이드\n\n"
-        "<!-- E 파트의 수정 가이드 템플릿과 연결 예정 -->\n"
-        "- 수정 후 다시 push하면 Security Gate가 재실행됩니다.\n"
-        if block_reasons else ""
-    )
+    guide_section = build_guide_section(decision)
 
     return (
         f"## Secure PR Gate 결과\n\n"

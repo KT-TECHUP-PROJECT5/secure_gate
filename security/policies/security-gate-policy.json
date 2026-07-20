@@ -1,6 +1,37 @@
 {
-  "blockOnCritical": true,
-  "blockOnHigh": true,
-  "blockOnSecret": true,
-  "warnOnMedium": true
+  "version": "2.0",
+  "severityMapping": {
+    "semgrep": {
+      "ERROR": "high",
+      "WARNING": "medium",
+      "INFO": "low"
+    },
+    "gitleaks": {
+      "default": "secret"
+    },
+    "trivy": {
+      "CRITICAL": "critical",
+      "HIGH": "high",
+      "MEDIUM": "medium",
+      "LOW": "low",
+      "UNKNOWN": "medium"
+    },
+    "zap": {
+      "High": "high",
+      "Medium": "medium",
+      "Low": "low",
+      "Informational": "low"
+    }
+  },
+  "toolCategoryMap": {
+    "semgrep": "sast",
+    "gitleaks": "secret",
+    "trivy": "dependency",
+    "zap": "dast"
+  },
+  "gateRules": {
+    "blockOnSeverity": ["critical", "high", "secret"],
+    "warnOnSeverity": ["medium"]
+  },
+  "unknownSeverityFallback": "medium"
 }

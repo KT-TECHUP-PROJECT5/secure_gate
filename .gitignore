@@ -5,6 +5,12 @@
 security/reports/*.json
 security/reports/*.sarif
 
+# SBOM 파이프라인 중간 생성물 (2·3단계 산출물)
+security/sbom/generated/
+
+# 로컬 스캔 원본 출력 (Trivy/Semgrep/Gitleaks 수동 실행 결과)
+check/
+
 # Python
 __pycache__/
 *.pyc
