@@ -60,9 +60,30 @@ on:
         type: string
         required: false
         default: "20"
+      dockerfile_path:
+        description: Dockerfile path relative to caller repository (empty = auto-detect root Dockerfile/dockerfile only)
+        type: string
+        required: false
+        default: ""
+      docker_build_context:
+        description: Docker build context path relative to caller repository
+        type: string
+        required: false
+        default: "."
+      dependency_track_project_uuid:
+        description: Existing Dependency-Track project UUID for CycloneDX BOM upload (no autoCreate)
+        type: string
+        required: false
+        default: ""
     secrets:
       DYNATRACE_TOKEN:
         description: Optional Dynatrace API token for runtime observability (extension)
+        required: false
+      DEPENDENCY_TRACK_URL:
+        description: Dependency-Track Backend API base URL (not UI-only URL)
+        required: false
+      DEPENDENCY_TRACK_API_KEY:
+        description: Dependency-Track API Key for BOM upload
         required: false
 
 jobs:
@@ -185,6 +206,7 @@ jobs:
 
   # ──────────────────────────────────────────
   # 4. Dependency Scan (Trivy) - C파트
+  # CVE JSON → Gate / CycloneDX SBOM → DT (optional UUID upload)
   # ──────────────────────────────────────────
   dependency-scan:
     name: Dependency Scan (Trivy)
@@ -192,6 +214,13 @@ jobs:
     steps:
       - name: Checkout caller repository
         uses: actions/checkout@v4
+
+      - name: Checkout Secure Gate tooling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.gate_repository }}
+          ref: ${{ inputs.gate_ref }}
+          path: .secure-gate
 
       - name: Install Trivy
         run: |
@@ -203,23 +232,112 @@ jobs:
           tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
           sudo install /tmp/trivy /usr/local/bin/trivy
 
-      - name: Run Trivy
-        id: trivy-scan
-        continue-on-error: true
+      - name: Resolve Dockerfile and scan mode
+        id: resolve-dockerfile
         run: |
-          mkdir -p security/reports
-          trivy fs \
-            --scanners vuln \
-            --file-patterns "pip:requirements-legacy.txt" \
-            --format json \
-            --output security/reports/dependency-report.json \
-            --exit-code 0 \
-            --no-progress \
-            .
+          set -euo pipefail
+          INPUT_PATH="${{ inputs.dockerfile_path }}"
+          CONTEXT="${{ inputs.docker_build_context }}"
+          DOCKERFILE=""
 
-      - name: Validate Trivy report
+          if [ -n "$INPUT_PATH" ]; then
+            if [ ! -f "$INPUT_PATH" ]; then
+              echo "dockerfile_path was set but file not found: $INPUT_PATH"
+              exit 1
+            fi
+            DOCKERFILE="$INPUT_PATH"
+          elif [ -f "Dockerfile" ]; then
+            DOCKERFILE="Dockerfile"
+          elif [ -f "dockerfile" ]; then
+            DOCKERFILE="dockerfile"
+          fi
+
+          if [ -n "$DOCKERFILE" ]; then
+            MODE="image"
+          else
+            MODE="fs"
+          fi
+
+          echo "dockerfile=${DOCKERFILE}" >> "$GITHUB_OUTPUT"
+          echo "context=${CONTEXT}" >> "$GITHUB_OUTPUT"
+          echo "mode=${MODE}" >> "$GITHUB_OUTPUT"
+          echo "Resolved Dockerfile: '${DOCKERFILE:-<none>}'"
+          echo "Docker build context: '${CONTEXT}'"
+          echo "Trivy scan mode: ${MODE}"
+
+      - name: Build image for Trivy (Dockerfile branch)
+        if: steps.resolve-dockerfile.outputs.mode == 'image'
+        run: |
+          set -euo pipefail
+          DOCKERFILE="${{ steps.resolve-dockerfile.outputs.dockerfile }}"
+          CONTEXT="${{ steps.resolve-dockerfile.outputs.context }}"
+          IMAGE_TAG="secure-gate-scan:${{ github.sha }}"
+          echo "Building ${IMAGE_TAG} from -f ${DOCKERFILE} ${CONTEXT}"
+          docker build -f "${DOCKERFILE}" -t "${IMAGE_TAG}" "${CONTEXT}"
+
+      - name: Run Trivy CVE scan
+        id: trivy-cve
+        run: |
+          set -euo pipefail
+          mkdir -p security/reports
+          MODE="${{ steps.resolve-dockerfile.outputs.mode }}"
+          IMAGE_TAG="secure-gate-scan:${{ github.sha }}"
+
+          if [ "$MODE" = "image" ]; then
+            trivy image \
+              --scanners vuln \
+              --format json \
+              --output security/reports/dependency-report.json \
+              --exit-code 0 \
+              --no-progress \
+              "${IMAGE_TAG}"
+          else
+            trivy fs \
+              --scanners vuln \
+              --file-patterns "pip:requirements-legacy.txt" \
+              --format json \
+              --output security/reports/dependency-report.json \
+              --exit-code 0 \
+              --no-progress \
+              .
+          fi
+
+      - name: Generate CycloneDX SBOM
+        id: trivy-sbom
+        run: |
+          set -euo pipefail
+          mkdir -p security/reports
+          MODE="${{ steps.resolve-dockerfile.outputs.mode }}"
+          IMAGE_TAG="secure-gate-scan:${{ github.sha }}"
+
+          if [ "$MODE" = "image" ]; then
+            trivy image \
+              --format cyclonedx \
+              --output security/reports/sbom.cdx.json \
+              --no-progress \
+              "${IMAGE_TAG}"
+          else
+            trivy fs \
+              --file-patterns "pip:requirements-legacy.txt" \
+              --format cyclonedx \
+              --output security/reports/sbom.cdx.json \
+              --no-progress \
+              .
+          fi
+
+      - name: Pin CycloneDX specVersion to 1.6
+        run: |
+          python3 .secure-gate/scripts/pin-cyclonedx-specversion.py \
+            --sbom security/reports/sbom.cdx.json \
+            --spec-version 1.6
+
+      - name: Validate Trivy CVE report
         run: |
           python3 -c 'import json; data=json.load(open("security/reports/dependency-report.json")); assert isinstance(data, dict); assert data.get("SchemaVersion") == 2'
+
+      - name: Validate CycloneDX SBOM
+        run: |
+          python3 -c 'import json; d=json.load(open("security/reports/sbom.cdx.json")); assert d.get("bomFormat")=="CycloneDX"; assert d.get("specVersion")=="1.6"'
 
       - name: Upload dependency scan report
         if: always()
@@ -227,6 +345,62 @@ jobs:
         with:
           name: dependency-report
           path: security/reports/dependency-report.json
+          if-no-files-found: ignore
+
+      - name: Upload SBOM artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: security/reports/sbom.cdx.json
+          if-no-files-found: ignore
+
+      - name: Upload SBOM to Dependency-Track
+        id: dependency_track_upload
+        continue-on-error: true
+        env:
+          DEPENDENCY_TRACK_URL: ${{ secrets.DEPENDENCY_TRACK_URL }}
+          DEPENDENCY_TRACK_API_KEY: ${{ secrets.DEPENDENCY_TRACK_API_KEY }}
+        run: |
+          python3 .secure-gate/scripts/upload-sbom-to-dependency-track.py \
+            --sbom security/reports/sbom.cdx.json \
+            --project-uuid "${{ inputs.dependency_track_project_uuid }}" \
+            --report security/reports/dependency-track-upload-report.json
+
+      - name: Ensure Dependency-Track upload report
+        if: always()
+        run: |
+          set -euo pipefail
+          REPORT="security/reports/dependency-track-upload-report.json"
+          mkdir -p security/reports
+          if [ ! -f "$REPORT" ]; then
+            python3 -c 'import json,pathlib; p=pathlib.Path("security/reports/dependency-track-upload-report.json"); p.write_text(json.dumps({"status":"failed","project_uuid":"","reason":"report-missing"}, indent=2)+"\n")'
+          fi
+
+      - name: Snapshot dependency-scan history
+        id: dependency_scan_history
+        if: always()
+        run: |
+          python3 .secure-gate/scripts/snapshot-dependency-scan-history.py \
+            --reports-dir security/reports \
+            --mode "${{ steps.resolve-dockerfile.outputs.mode }}" \
+            --trivy-version "0.70.0" \
+            --cyclonedx-spec "1.6"
+
+      - name: Upload Dependency-Track upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-track-upload-report
+          path: security/reports/dependency-track-upload-report.json
+
+      - name: Upload dependency-scan history snapshot
+        if: always() && steps.dependency_scan_history.outputs.run_id != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-scan-history-${{ steps.dependency_scan_history.outputs.run_id }}
+          path: ${{ steps.dependency_scan_history.outputs.path }}
+          if-no-files-found: ignore
 
   # ──────────────────────────────────────────
   # 5. Runtime Validation - D파트 연결 예정

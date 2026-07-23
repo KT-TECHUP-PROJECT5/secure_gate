@@ -42,8 +42,8 @@ Secure PR Gate는 GitHub Actions **Reusable Workflow** 기반 DevSecOps 보안 �
 | --- | --- | --- |
 | `build-test` | 빌드 및 테스트 | Placeholder |
 | `sast` | Semgrep 정적 분석 | 연동됨 |
-| `secret-scan` | Gitleaks 민감정보 탐지 | Placeholder (C파트 연결 예정) |
-| `dependency-scan` | Trivy 의존성 CVE 검사 | Placeholder (C파트 연결 예정) |
+| `secret-scan` | Gitleaks 민감정보 탐지 | 연동됨 |
+| `dependency-scan` | Trivy CVE + CycloneDX SBOM (+ Dependency-Track 업로드, 선택) | 연동됨 |
 | `runtime-validation` | Health Check / Smoke Test / DAST (ZAP·Nuclei) | inputs 기반 runner-local 지원 |
 | `aggregate-and-gate` | 결과 통합 및 Gate 판단 | 구현 완료 |
 | `pr-comment` | PR 댓글 작성 | 구현 완료 |
@@ -141,6 +141,9 @@ jobs:
 | `target_url` | `""` | 외부 Preview/Staging URL (있으면 localhost 대신 사용) |
 | `policy_path` | `""` | caller 정책 경로 (비어 있으면 기본/로컬 정책) |
 | `node_version` | `20` | Node 기반 install/build/start 시 사용 |
+| `dockerfile_path` | `""` | Dockerfile 경로. 비어 있으면 루트 `Dockerfile` → `dockerfile`만 자동 탐색 (하위 경로 자동 선택 안 함) |
+| `docker_build_context` | `"."` | Docker build context. 모노레포는 caller가 명시 |
+| `dependency_track_project_uuid` | `""` | 기존 Dependency-Track 프로젝트 UUID (프로젝트 자동 생성 없음) |
 
 ### Secrets
 
@@ -148,6 +151,10 @@ jobs:
 | --- | --- | --- |
 | `GITHUB_TOKEN` | 자동 | PR 댓글용 (`secrets: inherit` 권장) |
 | `DYNATRACE_TOKEN` | 선택 | Dynatrace Problems API 조회용. `problems.read` 범위의 읽기 전용 토큰을 등록하고 실행 step에서 `DYNATRACE_API_TOKEN`으로 매핑한다. |
+| `DEPENDENCY_TRACK_URL` | 선택 | Dependency-Track **Backend API** base URL (UI 전용 주소 아님) |
+| `DEPENDENCY_TRACK_API_KEY` | 선택 | Dependency-Track API Key |
+
+URL / API Key / Project UUID 중 하나라도 없으면 Dependency-Track 업로드만 skip한다. Trivy CVE Gate와 SBOM artifact는 계속 진행된다.
 
 Dynatrace 연동에 필요한 D파트 전달값은 다음과 같다. 현재 Workflow에는 토큰 선언만 있고 실제 수집 step은 아직 연결되지 않았으므로 A파트가 D파트 가이드의 순서대로 연결해야 한다.
 
@@ -161,6 +168,73 @@ Dynatrace 연동에 필요한 D파트 전달값은 다음과 같다. 현재 Work
 | 통합 결과 | `security/reports/runtime-report.json` |
 
 ---
+
+## Dependency Scan (Trivy + SBOM + Dependency-Track)
+
+`dependency-scan` Job은 CVE 보고서(Gate용)와 CycloneDX SBOM을 **분리 생성**한다.
+
+### Dockerfile 탐색 우선순위
+
+1. `dockerfile_path` input이 있으면 해당 경로 사용
+2. 없으면 저장소 **루트**의 `Dockerfile`, 그다음 `dockerfile`
+3. 하위 경로 Dockerfile은 자동 선택하지 않음 → 모노레포는 `dockerfile_path` / `docker_build_context`를 caller가 명시
+
+| 분기 | CVE | SBOM |
+| --- | --- | --- |
+| Dockerfile 있음 | `docker build` 후 `trivy image` (JSON) | 동일 이미지에 `trivy image --format cyclonedx` |
+| Dockerfile 없음 | `trivy fs` (JSON, `--file-patterns pip:requirements-legacy.txt`) | `trivy fs --file-patterns ... --format cyclonedx` |
+
+검증:
+
+- `dependency-report.json`: `SchemaVersion == 2` (실패 시 Job 실패)
+- `sbom.cdx.json`: `bomFormat == "CycloneDX"` 및 `specVersion == "1.6"` (실패 시 Job 실패)
+  - Trivy가 더 높은 specVersion을 내더라도 생성 직후 `scripts/pin-cyclonedx-specversion.py`로 **1.6 고정** (Dependency-Track 5.0.x 호환)
+- finding은 `--exit-code 0`으로 Job을 막지 않음. Docker/Trivy 기술 실패는 Job 실패 (`continue-on-error` 미사용)
+
+### Artifacts
+
+| Artifact | 경로 | 역할 |
+| --- | --- | --- |
+| `dependency-report` | `security/reports/dependency-report.json` | Gate/Aggregator/DAST용 **최신** Trivy CVE JSON (계약 경로) |
+| `sbom` | `security/reports/sbom.cdx.json` | **최신** CycloneDX SBOM (specVersion 1.6) |
+| `dependency-track-upload-report` | `security/reports/dependency-track-upload-report.json` | **최신** DT 업로드 결과 (`if: always()`). Aggregator 필수 입력 아님 |
+| `dependency-scan-history-<run_id>` | `security/reports/history/<run_id>/` | 실행 스냅샷 (동일 파일명 + `meta.json`). Gate 계약 경로와 분리 |
+
+### 결과 파일 레이아웃
+
+```text
+security/reports/
+  dependency-report.json                 # latest (계약)
+  sbom.cdx.json                          # latest (계약)
+  dependency-track-upload-report.json    # latest
+  history/
+    20260723T063542Z_abc1234_run123456/
+      dependency-report.json
+      sbom.cdx.json
+      dependency-track-upload-report.json
+      meta.json
+```
+
+`history/<run_id>/`는 UTC 시각 + commit short SHA (+ `GITHUB_RUN_ID`)로 구분한다.
+Gate/DAST는 항상 latest 계약 경로만 읽고, 과거 비교·감사용으로 history를 사용한다.
+
+### Dependency-Track 연동
+
+Dependency-Track은 Gate 판정기가 아니라 **SBOM/SCA 추적 대시보드**다.
+
+- 사용자는 DT에서 프로젝트를 **미리 생성**하고 UUID를 `dependency_track_project_uuid`에 넣는다
+- `autoCreate` / 저장소명 기반 자동 식별은 사용하지 않는다
+- API: `POST /api/v1/bom` (`project=<uuid>`, `bom=@sbom.cdx.json`, Header `X-Api-Key`)
+- `DEPENDENCY_TRACK_URL`은 Backend API base URL이다. UI URL을 넣으면 업로드가 실패할 수 있다
+- 업로드 step만 `continue-on-error: true` (DT API 실패가 Trivy Gate를 막지 않음)
+
+업로드 리포트 `status`:
+
+| status | 의미 |
+| --- | --- |
+| `succeeded` | DT가 BOM 업로드 요청을 **수신** 성공 (내부 취약점 분석 완료를 보장하지 않음) |
+| `skipped` | `not-configured` 또는 `secrets-unavailable` (Fork PR 등) |
+| `failed` | HTTP/네트워크/스크립트 오류 (`reason=http-401` 등) |
 
 ## 스크립트 checkout 방식
 
@@ -216,8 +290,10 @@ security/reports/
   build-report.json         # Build/Test 결과
   sast-report.json          # SAST 결과 (C파트)
   secret-report.json        # Secret Scan 결과 (C파트)
-  dependency-report.json    # Dependency Scan 결과 (C파트)
-  trivy.json                # Trivy 원본 JSON (C파트 -> D파트 CVE 우선 검사 입력)
+  dependency-report.json    # Dependency Scan 최신 결과 (C파트)
+  sbom.cdx.json             # CycloneDX 1.6 SBOM (C파트)
+  dependency-track-upload-report.json # Dependency-Track 업로드 결과 (C파트)
+  history/<run_id>/         # Dependency Scan 실행 스냅샷 (C파트)
   zap-report.json           # OWASP ZAP 원본 JSON (D파트 중간 입력)
   nuclei-cve-ids.txt        # Trivy High/Critical CVE에서 만든 Nuclei template ID 입력
   nuclei-report.jsonl       # Nuclei 원본 JSONL (D파트 중간 입력)
@@ -285,3 +361,6 @@ security/reports/
 | `scripts/runtime-validation.py` | Health / Smoke / Header / Custom Check / ZAP / Nuclei / Dynatrace 결과를 `runtime-report.json`으로 생성 |
 | `scripts/fetch-dynatrace-problems.py` | Dynatrace Problems API v2의 열린 문제를 JSON으로 수집 |
 | `scripts/trivy-to-nuclei.py` | Trivy 원본 JSON의 High/Critical CVE를 Nuclei template ID 입력 파일로 변환 |
+| `scripts/upload-sbom-to-dependency-track.py` | CycloneDX SBOM을 기존 DT 프로젝트 UUID에 업로드 |
+| `scripts/pin-cyclonedx-specversion.py` | CycloneDX `specVersion`을 1.6으로 고정 (DT 호환) |
+| `scripts/snapshot-dependency-scan-history.py` | dependency-scan latest → `history/<run_id>/` 스냅샷 |
