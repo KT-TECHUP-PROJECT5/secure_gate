@@ -2,7 +2,7 @@
 문서명: Runtime Validation 가이드
 최신화: 2026-07-23
 작성자: D파트
-Version: 1.3.0
+Version: 1.7.0
 ---
 
 # Runtime Validation Guide
@@ -42,17 +42,19 @@ D파트는 Workflow YAML을 직접 수정하지 않고, 아래 실행 방식과 
 | Staging URL | 공용 Staging은 `http://www.securegate.n-e.kr`이다. 외부 검증에서는 `STAGING_URL=http://www.securegate.n-e.kr`을 사용한다. PR 임시 환경에서는 기존대로 `RUNTIME_BASE_URL=http://127.0.0.1:8000`을 사용한다. |
 | Health Check Endpoint | `GET /posts`, 기대 상태 코드 `200`. 이 앱은 전용 `/health`가 없으므로 `/posts`를 대체 경로로 사용한다. `HEAD /posts`는 `405`이므로 GET 요청으로 검사한다. |
 | Smoke Test 실행 명령어 | `RUNTIME_BASE_URL=http://127.0.0.1:8000 HEALTH_CHECK_PATH=/posts HEALTH_EXPECTED_STATUS=200 SMOKE_TEST_PATHS="/login=200,/posts=200,/upload=200\|303,/docs=200,/redoc=200" python3 scripts/runtime-validation.py` |
-| ZAP 실행 명령어 | 아래 `PR 임시 환경에서 ZAP 실행` 명령어를 사용한다. |
+| PR ZAP 실행 명령어 | 아래 `PR 임시 환경에서 ZAP 실행`의 `zap-baseline.py` 명령어를 사용한다. |
+| Merge 이후 ZAP 실행 명령어 | ECS 배포와 Health Check 성공 후 아래 `Merge 이후 Staging Full Scan`의 `zap-full-scan.py` 명령어를 사용한다. |
 | ZAP 결과 파일 경로 | `security/reports/zap-report.json` |
-| Nuclei 실행 명령어 | 아래 `PR 임시 환경에서 Nuclei 실행` 명령어를 사용한다. PR 기본값은 `medium,high,critical`, `xss`, `timeout 5m`이다. |
+| PR Nuclei 실행 명령어 | 아래 `PR 임시 환경에서 Nuclei 실행` 명령어를 사용한다. PR 기본값은 `medium,high,critical`, `xss`, `timeout 5m`이다. |
+| Merge 이후 Nuclei 실행 명령어 | 태그 제한 없이 기본 서명 템플릿을 `low,medium,high,critical` 범위로 실행한다. 전체 timeout은 30분이다. |
 | Nuclei 결과 파일 경로 | `security/reports/nuclei-report.jsonl` |
-| Trivy CVE 연동 | C파트의 Trivy 원본 JSON에서 High/Critical CVE를 추출하고, Nuclei `-id` 입력으로 사용한다. 원본 파일명은 파트 간 합의한 실제 경로를 인자로 전달한다. |
-| Dynatrace 실행 방식 | 고정 Staging에 설치된 OneAgent와 Synthetic HTTP Monitor가 문제를 생성하면 `scripts/fetch-dynatrace-problems.py`가 Problems API v2로 열린 문제를 수집한다. |
-| Dynatrace 설정값 | Environment URL은 `https://xlj20734.live.dynatrace.com`, selector는 `status("open"),entityTags("environment:staging")`, 토큰 권한은 `problems.read`만 사용한다. |
+| Trivy CVE 연동 | C파트 `dependency-scan` Job이 생성한 원본 `security/reports/dependency-report.json` Artifact에서 High/Critical CVE를 추출하고 Nuclei `-id` 입력으로 사용한다. A파트가 Artifact 다운로드와 실행 순서를 연결해야 한다. |
+| Dynatrace 실행 방식 | ECS Service는 OneAgent Code Module이 포함된 `secure-gate-dast:2`를 실행 중이다. `initoneagent` 종료 코드 `0`, `web` RUNNING, ALB Target healthy를 확인했다. Dynatrace `Services`의 APM 데이터 유입은 별도 확인이 필요하다. |
+| Dynatrace 설정값 | Environment URL은 `https://xlj20734.live.dynatrace.com`, selector는 `status("open"),entityTags("environment:staging")`이다. ECS 설치용 PaaS Token과 Problems API용 `problems.read` 토큰은 분리한다. |
 | Dynatrace 결과 파일 경로 | 원본은 `security/reports/dynatrace-problems.json`, 공통 스키마 통합 결과는 `security/reports/runtime-report.json`이다. |
 | 보안 헤더 검증 기준 | HTTP: `x-content-type-options`, `x-frame-options`, `content-security-policy`. HTTPS에서는 `strict-transport-security`를 자동으로 추가한다. |
 | Custom Runtime Check | `debug-exposure`, `docs-exposure`, `reflected-xss`, `search-sqli`, `admin-access`, `idor`를 기본 실행한다. |
-| Runtime Validation 실패 기준 | Critical/High/Secret finding이 하나라도 있으면 `failed`, Medium/Low만 있으면 `warning`, finding이 없으면 `passed`. 실제 Merge 차단은 E파트 Policy Evaluator가 결정한다. |
+| Runtime Validation 실패 기준 | Critical/High/Secret finding이 하나라도 있으면 `failed`, Medium/Low만 있으면 `warning`, finding이 없으면 `passed`. PR의 Merge 차단과 배포 후 승격 차단은 E파트 Policy Evaluator가 결정한다. |
 
 ZAP, Nuclei, Dynatrace 원본 결과는 각각 중간 입력으로 보존한다. 이를 공통 finding으로 변환한 D파트 최종 결과는 `security/reports/runtime-report.json`이다.
 
@@ -68,7 +70,26 @@ HEALTH_CHECK_PATH=/posts
 SMOKE_TEST_PATHS=/login=200,/posts=200,/upload=200|303,/docs=200,/redoc=200
 ```
 
-`http://www.securegate.n-e.kr/login`은 Staging의 로그인 페이지다. Runtime Validation의 Base URL에는 `/login`을 붙이지 않고, `/login`은 Smoke Test 경로로 분리한다. 2026-07-21 기준 `/login`과 `/posts`의 HTTP `200` 응답을 확인했다.
+`http://www.securegate.n-e.kr/login`은 Staging의 로그인 페이지다. Runtime Validation의 Base URL에는 `/login`을 붙이지 않고, `/login`은 Smoke Test 경로로 분리한다. 루트 경로 `/`는 `404`이므로 Health Check와 스캐너의 시작 경로로 사용하지 않는다. 2026-07-23 기준 `GET /posts`의 HTTP `200` 응답과 ALB Target Group의 `healthy` 상태를 확인했다.
+
+현재 Staging 배포 정보:
+
+| 항목 | 값 |
+| --- | --- |
+| 실행 환경 | AWS ECS Fargate |
+| ECS Cluster | `secure-gate-dast` |
+| ECS Service | `secure-gate-dast` |
+| Launch Type | `FARGATE` |
+| 현재 실행 Task Definition | `secure-gate-dast:2`, 2026-07-23 17:10:43 KST 배포 완료 |
+| OneAgent 적용 방식 | `initoneagent`가 Code Module을 공유 볼륨에 복사하고 `web`이 로드 |
+| Container | `web`, port `8000`, process `uvicorn` |
+| ALB Health Check | `GET /posts`, matcher `200-399` |
+| 현재 ALB Target | `10.42.0.240:8000`, 상태 `healthy` |
+| 외부 Health Check | `GET /posts` -> `200`, 확인 시 응답 시간 `0.030271s` |
+| 배포 Repository | `https://github.com/KT-TECHUP-PROJECT5/web` |
+| 배포 Git 기준 | `main` / `1574f7c845e1736dccc3b32120cb02e97c863bad` |
+
+ALB Target IP는 Fargate Task가 교체되면 변경될 수 있는 내부 주소다. Runtime Validation과 Synthetic Monitor는 Target IP가 아니라 고정 ALB 도메인 `http://www.securegate.n-e.kr`을 사용한다.
 
 ### 역할 구분
 
@@ -88,8 +109,10 @@ SMOKE_TEST_PATHS=/login=200,/posts=200,/upload=200|303,/docs=200,/redoc=200
 Dynatrace 연동은 세 부분으로 나뉜다.
 
 ```text
-EC2 OneAgent
--> 호스트·프로세스·서비스 상태 수집
+ECS Fargate Task
+-> ALB를 통해 고정 Staging URL 제공
+-> OneAgent Code Module을 포함한 revision 2 실행
+-> initoneagent 완료 후 web 컨테이너 기동
 
 Dynatrace Synthetic HTTP Monitor
 -> 외부에서 GET http://www.securegate.n-e.kr/posts 실행
@@ -100,39 +123,74 @@ Problems API 수집 스크립트
 -> runtime-validation.py가 공통 finding으로 변환
 ```
 
-OneAgent가 설치돼 있어도 고정 URL의 HTTP 정상 응답을 직접 확인하는 것은 별도 Synthetic HTTP Monitor의 역할이다. 반대로 Synthetic Monitor만 사용하면 EC2 프로세스, CPU, 메모리, 서비스 내부 원인 정보가 부족하다. 두 기능을 함께 사용해야 URL 장애와 서버 원인을 연결해 볼 수 있다.
+revision 2 배포와 외부 Synthetic HTTP Monitor는 정상이다. OneAgent APM 데이터가 `Services`에 유입되면 애플리케이션 요청, 오류와 응답시간을 추가로 관찰할 수 있다. Problems API는 열린 문제를 결과 파일로 수집하는 별도 연동이며, 서비스 목록 표시 여부와 동일한 검증이 아니다.
 
-### 1. EC2 OneAgent 태그 설정
+### 1. ECS Fargate OneAgent 현재 상태
 
-EC2에서 다음 명령을 실행해 Staging 호스트 범위를 구분한다. OneAgent가 이미 설치돼 있으므로 재설치하지 않는다.
+현재 Staging은 EC2 인스턴스에 직접 접속해 프로세스를 실행하는 구조가 아니다. Fargate에서는 호스트 설치 파일을 실행하지 않고 `initoneagent` 컨테이너가 공유 볼륨에 Python OneAgent Code Module을 복사한 뒤 `web` 컨테이너가 `LD_PRELOAD`로 로드하는 application-only 방식을 사용한다. 따라서 EC2용 `systemctl status oneagent`나 `oneagentctl` 명령은 적용하지 않는다.
 
-```bash
-sudo /opt/dynatrace/oneagent/agent/tools/oneagentctl \
-  --set-host-tag=environment=staging \
-  --set-host-tag=service=secure-gate
+2026-07-23 배포 상태:
+
+| 항목 | 상태 |
+| --- | --- |
+| AWS Secrets Manager | `secure-gate/dynatrace/fargate` 생성 완료 |
+| ECS Task Execution Role | Secret 읽기 권한 추가 완료 |
+| OneAgent Task Definition | `secure-gate-dast:2` 등록 및 Service 배포 완료 |
+| 현재 ECS Service | `secure-gate-dast:2`, steady state |
+| Dynatrace 설치용 PaaS Token | Secret 등록 및 배포 사용 완료 |
+| Connection Info | `tenantToken`, `formattedCommunicationEndpoints` 조회 완료 |
+| Secret 필수 Key | `DT_PAAS_TOKEN`, `DT_TENANTTOKEN`, `DT_CONNECTION_POINT` |
+| `initoneagent` | `STOPPED`, exit code `0`, Code Module copy 성공 |
+| `web` | `RUNNING` |
+| ALB Target | `10.42.0.240:8000`, `healthy` |
+| Health Check | `GET /posts` -> `200`, 응답 시간 `0.030271s` |
+| CloudWatch | OneAgent 오류 패턴 `0`, 토큰 접두 문자열 노출 `0` |
+| Dynatrace `Services` | 정상 요청 발생 후에도 서비스 목록 미표시, 추가 점검 필요 |
+
+실제 토큰, Tenant Token, Connection Point, 전체 Secret ARN은 문서나 Git 저장소에 기록하지 않는다.
+
+배포 완료 흐름과 남은 검증:
+
+```text
+Secret 세 필수 Key 등록 완료
+-> ECS Service를 secure-gate-dast:2로 배포 완료
+-> initoneagent exit code 0 확인 완료
+-> web RUNNING, ALB Target healthy, GET /posts 200 확인 완료
+-> 정상 요청 트래픽 발생
+-> Dynatrace Services에서 Python/FastAPI 데이터 유입 재확인 필요
 ```
 
-태그 확인:
+Task Definition, IAM, Secrets Manager와 ECS Service 변경은 B파트 또는 배포/인프라 담당 범위다. D파트는 Dynatrace 설치값과 Staging 검증 기준을 전달하고, 배포 후 서비스 데이터 유입, Synthetic Monitor, Problems API 수집과 Runtime finding 변환을 확인한다.
 
-```bash
-sudo /opt/dynatrace/oneagent/agent/tools/oneagentctl --get-host-tags
-sudo systemctl status oneagent
-```
+2026-07-23 D파트는 `/posts`, `/login`, `/docs`에 정상 요청 15건을 발생시키고 약 3분 뒤 Dynatrace `Services`를 다시 확인했으나 서비스 목록이 표시되지 않았다. 배포 실패로 단정하지 않고, `web` 컨테이너의 `LD_PRELOAD`, OneAgent 공유 볼륨 mount, `DT_TENANTTOKEN`, `DT_CONNECTION_POINT`, OneAgent 런타임 로그와 충분한 수집 대기 시간을 순서대로 재확인한다.
+
+ECS OneAgent용 Secret과 GitHub Actions용 Secret은 목적이 다르다.
+
+| Secret | 목적 |
+| --- | --- |
+| AWS Secrets Manager `secure-gate/dynatrace/fargate` | Fargate OneAgent Code Module 설치와 Dynatrace 통신 |
+| GitHub Secret `DYNATRACE_TOKEN` | `fetch-dynatrace-problems.py`의 Problems API 조회 |
+
+PaaS Token은 `InstallerDownload` 범위가 필요하고, `DYNATRACE_TOKEN`은 `problems.read`만 사용한다. 두 토큰을 서로 대체하거나 코드에 저장하지 않는다.
 
 ### 2. Synthetic HTTP Monitor 생성
 
-현재 Dynatrace UI의 `Synthetic` 앱에서 HTTP Monitor를 생성한다.
+2026-07-23 Dynatrace UI의 `Synthetic` 앱에서 아래 HTTP Monitor를 생성했다.
 
 | 설정 | 값 |
 | --- | --- |
 | 이름 | `secure-gate-staging-health` |
+| Monitor ID | `HTTP_CHECK-D9507A08C7F0DC5E` |
 | 요청 방식 | `GET` |
 | URL | `http://www.securegate.n-e.kr/posts` |
-| 성공 조건 | HTTP Status `200` |
+| 실패 조건 | HTTP Status `!= 200` |
 | 실행 주기 | `5 minutes` |
+| 실행 위치 | `Busan (Azure)`, Public |
 | 태그 | `environment:staging`, `service:secure-gate` |
 
 HTTP Monitor 생성은 현재 API가 아니라 UI에서 수행한다. Monitor가 실패해 Dynatrace Problem이 생성돼야 Problems API 결과와 Runtime Validation에 장애가 나타난다.
+
+2026-07-23 실행 확인 결과는 `Last status: Success`, Availability `100%`, HTTP `200`이며 확인 시점 응답 시간은 `153 ms`였다.
 
 ### 3. Problems API 토큰
 
@@ -204,13 +262,137 @@ DYNATRACE_API_TOKEN <- secrets.DYNATRACE_TOKEN
 Staging 배포 후 자동화 순서:
 
 ```text
-main 배포 완료
+main Merge
+-> OneAgent 적용 후에는 ECS Service가 secure-gate-dast:2 이상을 사용하도록 배포
+-> ALB Target healthy 확인
 -> GET /posts Health Check
--> ZAP/Nuclei 실행
+-> ZAP Full Scan 실행
+-> Nuclei 광범위 스캔 실행
 -> fetch-dynatrace-problems.py 실행
 -> runtime-validation.py 실행
 -> runtime-report.json과 원본 결과 Artifact 업로드
 ```
+
+## Merge 이후 Staging Full Scan
+
+PR 검사는 개발 피드백 속도를 위해 ZAP Baseline과 제한된 Nuclei 템플릿을 사용한다. `main` Merge 이후에는 실제 Merge 결과가 ECS Fargate Staging에 배포된 다음 아래 검사를 수행한다.
+
+```text
+main Merge
+-> ECS Staging 배포
+-> ALB Target healthy 및 GET /posts 200 확인
+-> ZAP Full Scan
+-> Nuclei 광범위 스캔
+-> Dynatrace Problems 수집
+-> Runtime Validation 통합
+-> Artifact 업로드
+-> Policy Evaluator 결과에 따라 다음 환경 승격 차단 또는 배포 실패 처리
+```
+
+Merge가 이미 끝난 뒤 실행되는 검사이므로 이 단계의 실패는 이전 Merge를 취소하는 의미가 아니다. Post-deploy Job을 실패 처리하고 Production 승격을 막거나, 팀 배포 정책에 따라 ECS rollback을 수행하는 기준으로 사용한다.
+
+두 스캐너는 동시에 실행하지 않는다. ZAP Active Scan과 Nuclei가 같은 Staging에 동시에 많은 요청을 보내면 앱 부하가 커지고 어떤 도구가 장애를 유발했는지 구분하기 어려우므로 ZAP 완료 후 Nuclei를 실행한다. 대상은 승인된 Staging ALB 도메인으로 한정하고 Production URL에는 실행하지 않는다.
+
+### 1. ZAP Full Scan
+
+ZAP `zap-full-scan.py`는 Spider로 경로를 수집하고 Passive Scan에 이어 실제 공격 요청을 보내는 Active Scan을 수행한다. 전체 실행 시간은 외부 `timeout 30m`으로 제한하고, Spider 탐색 시간은 `-m 5`, ZAP 시작과 Passive Scan 대기 시간은 `-T 10`으로 제한한다. `-j`는 Ajax Spider를 추가한다.
+
+```bash
+export STAGING_URL=http://www.securegate.n-e.kr
+export ZAP_TARGET_URL="${STAGING_URL}/posts"
+mkdir -p security/reports
+
+set +e
+timeout 30m docker run --rm \
+  -v "$GITHUB_WORKSPACE/security/reports:/zap/wrk:rw" \
+  ghcr.io/zaproxy/zaproxy:stable \
+  zap-full-scan.py \
+  -t "$ZAP_TARGET_URL" \
+  -m 5 \
+  -T 10 \
+  -j \
+  -J zap-report.json
+ZAP_EXIT_CODE=$?
+set -e
+
+case "$ZAP_EXIT_CODE" in
+  0|1|2) ;;
+  *) echo "ZAP Full Scan execution failed: exit $ZAP_EXIT_CODE"; exit "$ZAP_EXIT_CODE" ;;
+esac
+```
+
+ZAP의 `0`은 경고와 실패가 없는 실행, `1`은 FAIL finding, `2`는 WARN finding이다. 이 세 코드는 리포트를 Runtime Validation과 Policy Evaluator에 넘기기 위해 계속 진행한다. ZAP 자체 오류 `3`이나 전체 timeout `124` 등은 보안 finding이 아니라 스캐너 실행 실패이므로 Post-deploy Job을 실패 처리한다.
+
+결과 파일:
+
+```text
+security/reports/zap-report.json
+```
+
+### 2. Nuclei 광범위 스캔
+
+Nuclei에는 ZAP의 `zap-full-scan.py`와 같은 단일 Full Scan 모드가 없다. Merge 이후 검사는 `-tags` 제한을 제거하고 설치된 기본 서명 템플릿 전체에서 `low,medium,high,critical`을 실행하는 것을 프로젝트의 광범위 검사 기준으로 정의한다.
+
+```bash
+export NUCLEI_TARGET_URL=http://www.securegate.n-e.kr/posts
+: > security/reports/nuclei-report.jsonl
+
+set +e
+timeout 30m docker run --rm \
+  -v "$GITHUB_WORKSPACE/security/reports:/app/reports:rw" \
+  projectdiscovery/nuclei:latest \
+  -u "$NUCLEI_TARGET_URL" \
+  -severity low,medium,high,critical \
+  -rate-limit 20 \
+  -c 10 \
+  -bulk-size 10 \
+  -retries 1 \
+  -timeout 10 \
+  -stats \
+  -stats-interval 30 \
+  -jsonl \
+  -o /app/reports/nuclei-report.jsonl
+NUCLEI_EXIT_CODE=$?
+set -e
+
+if [ "$NUCLEI_EXIT_CODE" -ne 0 ]; then
+  echo "Nuclei broad scan execution failed: exit $NUCLEI_EXIT_CODE"
+  exit "$NUCLEI_EXIT_CODE"
+fi
+```
+
+`-tags`를 지정하지 않아 XSS뿐 아니라 노출, 설정 오류, 알려진 CVE 등 기본 템플릿 범위를 함께 검사한다. `-ni`도 사용하지 않으므로 Interactsh 기반 OAST 템플릿을 사용할 수 있지만, GitHub Runner에서 외부 Interactsh 통신이 허용되어야 한다. 외부 OAST를 허용하지 않는 팀 정책이면 `-ni`를 추가하고 그에 따른 탐지 범위 감소를 기록한다.
+
+Headless와 Fuzzing 템플릿은 기본 실행 범위와 부하 특성이 다르므로 이 Merge 이후 기본 명령에는 자동으로 포함하지 않는다. 필요하면 `-headless`, `-fuzz`를 사용하는 별도 야간/수동 정밀 검사로 분리하고, 상태 변경 가능성과 실행 시간을 먼저 검토한다.
+
+결과 파일:
+
+```text
+security/reports/nuclei-report.jsonl
+```
+
+Nuclei는 finding이 없어도 정상 종료할 수 있고 JSONL 파일이 비어 있을 수 있다. 따라서 파일이 비었다는 이유만으로 스캐너 실패로 판단하지 않고 명령 exit code와 실행 로그를 함께 확인한다.
+
+### 3. 통합과 배포 후 판정
+
+스캐너 실행 뒤 Dynatrace 문제를 수집하고 동일한 원본 파일 경로로 Runtime Validation을 실행한다.
+
+```bash
+python3 scripts/fetch-dynatrace-problems.py
+
+STAGING_URL=http://www.securegate.n-e.kr \
+HEALTH_CHECK_PATH=/posts \
+HEALTH_EXPECTED_STATUS=200 \
+SMOKE_TEST_PATHS="/login=200,/posts=200,/upload=200|303,/docs=200,/redoc=200" \
+ZAP_REPORT_PATH=security/reports/zap-report.json \
+NUCLEI_REPORT_PATH=security/reports/nuclei-report.jsonl \
+DYNATRACE_PROBLEMS_PATH=security/reports/dynatrace-problems.json \
+python3 scripts/runtime-validation.py
+```
+
+Active Scan 뒤에도 `GET /posts`가 `200`인지 다시 확인해 스캔으로 애플리케이션이 비정상 상태가 되지 않았는지 검증한다. ZAP/Nuclei 원본과 `runtime-report.json`은 모두 Artifact로 보존한다.
+
+현재 명령은 비인증 스캔이다. 로그인 뒤에만 접근 가능한 화면까지 정밀 검사하려면 B파트가 테스트 계정과 인증 흐름을 확정한 뒤 ZAP Context/User 설정과 Nuclei 인증 헤더 또는 쿠키를 별도로 추가해야 한다.
 
 고정 Staging이 아직 해당 PR 코드로 갱신되지 않은 상태라면 PR 전 검사를 이 URL에 실행해도 PR 변경분을 검증하는 것이 아니다. PR 단계는 runner-local/Preview 환경을 사용하고, 고정 Staging Dynatrace 연동은 배포 후 검증에 사용한다.
 
@@ -318,12 +500,22 @@ Trivy 원본 JSON의 `Results[].Vulnerabilities[]`에서 `Severity`가 `HIGH` �
 
 ```bash
 python3 scripts/trivy-to-nuclei.py \
-  security/reports/trivy.json \
+  security/reports/dependency-report.json \
   --output security/reports/nuclei-cve-ids.txt \
   --severities HIGH,CRITICAL
 ```
 
-C파트가 원본 Trivy 보고서를 `dependency-report.json`이라는 이름으로 제공한다면 첫 번째 경로만 `security/reports/dependency-report.json`으로 바꾼다. 이 스크립트는 팀 공통 스키마로 변환된 보고서가 아니라 `Results` 배열이 있는 Trivy 원본 JSON을 입력으로 받는다.
+C파트의 확정 원본 경로는 `security/reports/dependency-report.json`, Artifact 이름은 `dependency-report`다. 이 스크립트는 팀 공통 스키마로 변환된 보고서가 아니라 `SchemaVersion: 2`와 `Results` 배열이 있는 Trivy 원본 JSON을 입력으로 받는다.
+
+`dependency-scan`과 `runtime-validation`은 서로 다른 Runner에서 실행되므로 저장소에 파일이 자동으로 공유되지 않는다. A파트는 `runtime-validation` Job이 `dependency-scan`을 기다리게 하고 `dependency-report` Artifact를 다운로드한 뒤 변환 스크립트를 실행해야 한다.
+
+```text
+dependency-scan Job
+-> dependency-report Artifact 업로드
+runtime-validation Job
+-> dependency-report Artifact 다운로드
+-> trivy-to-nuclei.py 실행
+```
 
 생성 예시:
 
@@ -444,6 +636,8 @@ A파트는 아래 흐름을 `.github/workflows/pr-security-gate.yml`의 `runtime
 등록 대상 PR Workflow 흐름:
 
 ```text
+Wait for dependency-scan Job
+-> dependency-report Artifact 다운로드
 Run ZAP Baseline
 -> security/reports/zap-report.json 생성
 Run Nuclei Scan
