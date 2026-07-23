@@ -1,0 +1,33 @@
+[Auth]
+GET  /register - public
+POST /register - public, weak passwords allowed, A07
+GET  /login - public
+POST /login - public, SQLi and no login throttling/account lockout, A05/A07
+GET  /logout - login session
+
+[Posts]
+GET  /posts - public
+GET  /posts?keyword= - public, SQLi/reflected XSS, A05
+GET  /posts/new - login required
+POST /posts/new - login required, stored XSS, A05
+GET  /posts/mine - login required, current user's public/private posts
+GET  /posts/{post_id} - public, stored XSS, A05
+GET  /posts/private/{post_id} - login required, ownership check missing, A01
+POST /posts/{post_id}/delete - login required, authorization check missing, A01
+
+[Comments]
+POST /posts/{post_id}/comments - login required, stored XSS, A05
+
+[Upload]
+GET  /upload - login required, upload list
+POST /upload - login required, extension/MIME/size validation missing, A02
+GET  /download/{upload_id} - uploaded file download
+
+[Admin]
+GET /admin - login required, role check intentionally weak, A01/A09
+GET /admin/security-events - login required, role check intentionally weak, empty security log, A09
+
+[Debug]
+GET /debug/error - public, exception message exposure, A10
+GET /debug/db-error - public, database error exposure, A10
+GET /debug/path-error - public, internal path exposure, A10
