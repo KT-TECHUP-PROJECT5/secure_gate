@@ -255,7 +255,7 @@ CodeQL로 교체하지 않고 Semgrep을 고도화한다. CodeQL이 탐지한 Op
 | --- | --- |
 | Trivy CVE 보고서 | 무엇이 취약한가 (CVE, Severity, FixedVersion) — Gate 판정 입력 |
 | CycloneDX SBOM | 무엇이 들어있는가 (Component, Version, PURL, 의존 관계) |
-| Dependency-Track | SBOM/SCA 추적 대시보드. 기존 프로젝트 UUID에 BOM 업로드 (Gate 판정기 아님) |
+| Dependency-Track | SBOM/SCA 추적 대시보드. `secure-gate/github/<owner>/<repo>[/<service>]` + main, autoCreate. Gate 판정기 아님. 상세: `docs/dependency-track.md` |
 
 같은 Trivy로 생성할 수 있지만 용도가 다르다. SBOM의 빈 `vulnerabilities[]`를 “취약점 없음”으로 해석하지 않는다.
 Secure Gate는 CycloneDX **specVersion 1.6**으로 고정한다 (Dependency-Track 5.0.x 호환).

@@ -43,8 +43,11 @@ jobs:
       # --- Trivy image 분기 (모노레포는 경로를 명시) ---
       # dockerfile_path: apps/api/Dockerfile
       # docker_build_context: apps/api
-      # --- Dependency-Track (기존 프로젝트 UUID에 CycloneDX BOM 업로드, autoCreate 없음) ---
-      # dependency_track_project_uuid: "00000000-0000-0000-0000-000000000000"
+      # --- Dependency-Track (레포/서비스 name + main, 없으면 autoCreate) ---
+      # dependency_track_service_name: backend
+      # dependency_track_project_version: main
+      # dependency_track_upload_mode: main-only
+      # 상세: docs/dependency-track.md
     secrets: inherit
     # Dynatrace / Dependency-Track 확장 시:
     # secrets:

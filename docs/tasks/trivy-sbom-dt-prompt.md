@@ -2,10 +2,14 @@
 문서명: Trivy + SBOM + Dependency-Track 구현 프롬프트
 최신화: 2026-07-23
 작성자: 이윤재
-Version: 3.1.0
+Version: 3.2.0
 ---
 
-# Secure PR Gate: Trivy → SBOM → Dependency-Track (UUID)
+> **상태:** Trivy/SBOM 구현 기록용. Dependency-Track은 UUID 방식이 아니라  
+> **name/version + autoCreate + main-only**로 확정됨.  
+> 운영 문서: [`docs/dependency-track.md`](../dependency-track.md)
+
+# Secure PR Gate: Trivy → SBOM → Dependency-Track
 
 에이전트/구현 담당자가 그대로 실행할 수 있는 작업 프롬프트다.
 DAST(Nuclei/ZAP) 및 `runtime-validation` Job 변경은 범위 밖이다.
@@ -26,12 +30,11 @@ Secure PR Gate Reusable Workflow(`.github/workflows/pr-security-gate.yml`)의 `d
 dependency-scan (Trivy)
   ├─ CVE 보고서 → security/reports/dependency-report.json (Gate용)
   ├─ CycloneDX SBOM → security/reports/sbom.cdx.json
-  └─ SBOM 업로드 → Dependency-Track (기존 프로젝트 UUID에 BOM 업로드)
+  └─ SBOM 업로드 → Dependency-Track (name/version + autoCreate, 기본 main-only)
 ```
 
-Dependency-Track 서버·프로젝트를 **생성하지 않는다**.
-호출자가 제공한 **기존 프로젝트 UUID**에 CycloneDX BOM만 업로드한다.
-`autoCreate`는 사용하지 않는다.
+DT 식별·모노레포·업로드 정책은 [`docs/dependency-track.md`](../dependency-track.md)를 따른다.  
+(아래 UUID 관련 서술은 초기 설계 잔여이며, 현행 구현과 다르면 dependency-track.md가 우선한다.)
 
 ---
 

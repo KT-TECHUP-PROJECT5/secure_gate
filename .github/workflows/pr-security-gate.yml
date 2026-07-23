@@ -70,11 +70,21 @@ on:
         type: string
         required: false
         default: "."
-      dependency_track_project_uuid:
-        description: Existing Dependency-Track project UUID for CycloneDX BOM upload (no autoCreate)
+      dependency_track_service_name:
+        description: Monorepo deployable unit (e.g. frontend/backend). Empty = whole-repo DT project
         type: string
         required: false
         default: ""
+      dependency_track_project_version:
+        description: Dependency-Track project version (default main; DT is managed on main)
+        type: string
+        required: false
+        default: "main"
+      dependency_track_upload_mode:
+        description: When to upload SBOM to DT (main-only | always | never)
+        type: string
+        required: false
+        default: "main-only"
     secrets:
       DYNATRACE_TOKEN:
         description: Optional Dynatrace API token for runtime observability (extension)
@@ -361,10 +371,16 @@ jobs:
         env:
           DEPENDENCY_TRACK_URL: ${{ secrets.DEPENDENCY_TRACK_URL }}
           DEPENDENCY_TRACK_API_KEY: ${{ secrets.DEPENDENCY_TRACK_API_KEY }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: |
           python3 .secure-gate/scripts/upload-sbom-to-dependency-track.py \
             --sbom security/reports/sbom.cdx.json \
-            --project-uuid "${{ inputs.dependency_track_project_uuid }}" \
+            --repository "${{ github.repository }}" \
+            --service-name "${{ inputs.dependency_track_service_name }}" \
+            --project-version "${{ inputs.dependency_track_project_version }}" \
+            --upload-mode "${{ inputs.dependency_track_upload_mode }}" \
             --report security/reports/dependency-track-upload-report.json
 
       - name: Ensure Dependency-Track upload report
@@ -374,7 +390,7 @@ jobs:
           REPORT="security/reports/dependency-track-upload-report.json"
           mkdir -p security/reports
           if [ ! -f "$REPORT" ]; then
-            python3 -c 'import json,pathlib; p=pathlib.Path("security/reports/dependency-track-upload-report.json"); p.write_text(json.dumps({"status":"failed","project_uuid":"","reason":"report-missing"}, indent=2)+"\n")'
+            python3 -c 'import json,pathlib; p=pathlib.Path("security/reports/dependency-track-upload-report.json"); p.write_text(json.dumps({"status":"failed","reason":"report-missing","project_name":"","project_version":"","project_uuid":"","parent_name":"","service_name":"","upload_mode":"","created":False,"tool":"dependency-track","target":"bom-upload"}, indent=2)+"\n")'
           fi
 
       - name: Snapshot dependency-scan history

@@ -143,7 +143,11 @@ jobs:
 | `node_version` | `20` | Node 기반 install/build/start 시 사용 |
 | `dockerfile_path` | `""` | Dockerfile 경로. 비어 있으면 루트 `Dockerfile` → `dockerfile`만 자동 탐색 (하위 경로 자동 선택 안 함) |
 | `docker_build_context` | `"."` | Docker build context. 모노레포는 caller가 명시 |
-| `dependency_track_project_uuid` | `""` | 기존 Dependency-Track 프로젝트 UUID (프로젝트 자동 생성 없음) |
+| `dependency_track_service_name` | `""` | 모노레포 서비스명 (예: `frontend`). 단일이면 비움 |
+| `dependency_track_project_version` | `main` | DT Project version |
+| `dependency_track_upload_mode` | `main-only` | `main-only` / `always` / `never` |
+
+상세: [`docs/dependency-track.md`](./dependency-track.md)
 
 ### Secrets
 
@@ -154,7 +158,7 @@ jobs:
 | `DEPENDENCY_TRACK_URL` | 선택 | Dependency-Track **Backend API** base URL (UI 전용 주소 아님) |
 | `DEPENDENCY_TRACK_API_KEY` | 선택 | Dependency-Track API Key |
 
-URL / API Key / Project UUID 중 하나라도 없으면 Dependency-Track 업로드만 skip한다. Trivy CVE Gate와 SBOM artifact는 계속 진행된다.
+URL / API Key가 없으면 Dependency-Track 업로드만 skip한다. Trivy CVE Gate와 SBOM artifact는 계속 진행된다.
 
 Dynatrace 연동에 필요한 D파트 전달값은 다음과 같다. 현재 Workflow에는 토큰 선언만 있고 실제 수집 step은 아직 연결되지 않았으므로 A파트가 D파트 가이드의 순서대로 연결해야 한다.
 
@@ -220,21 +224,14 @@ Gate/DAST는 항상 latest 계약 경로만 읽고, 과거 비교·감사용으�
 
 ### Dependency-Track 연동
 
-Dependency-Track은 Gate 판정기가 아니라 **SBOM/SCA 추적 대시보드**다.
+Dependency-Track은 Gate 판정기가 아니라 **SBOM/SCA 추적 대시보드**다.  
+운영 규칙·식별·모노레포·업로드 시기는 [`docs/dependency-track.md`](./dependency-track.md)를 본다.
 
-- 사용자는 DT에서 프로젝트를 **미리 생성**하고 UUID를 `dependency_track_project_uuid`에 넣는다
-- `autoCreate` / 저장소명 기반 자동 식별은 사용하지 않는다
-- API: `POST /api/v1/bom` (`project=<uuid>`, `bom=@sbom.cdx.json`, Header `X-Api-Key`)
-- `DEPENDENCY_TRACK_URL`은 Backend API base URL이다. UI URL을 넣으면 업로드가 실패할 수 있다
-- 업로드 step만 `continue-on-error: true` (DT API 실패가 Trivy Gate를 막지 않음)
-
-업로드 리포트 `status`:
-
-| status | 의미 |
-| --- | --- |
-| `succeeded` | DT가 BOM 업로드 요청을 **수신** 성공 (내부 취약점 분석 완료를 보장하지 않음) |
-| `skipped` | `not-configured` 또는 `secrets-unavailable` (Fork PR 등) |
-| `failed` | HTTP/네트워크/스크립트 오류 (`reason=http-401` 등) |
+- 식별: `secure-gate/github/<owner>/<repo>[/<service>]` + version `main` (UUID input 없음, `autoCreate`)
+- 기본 업로드: **main push only** (`dependency_track_upload_mode: main-only`)
+- `DEPENDENCY_TRACK_URL`은 Backend API base URL (UI 주소 아님)
+- 업로드 step만 `continue-on-error: true` (DT 실패가 Trivy Gate를 막지 않음)
+- `succeeded` = BOM **수신** 성공 (분석 완료 보장 아님)
 
 ## 스크립트 checkout 방식
 
@@ -366,6 +363,6 @@ security/reports/
 | `scripts/fetch-dynatrace-problems.py` | Dynatrace Problems API v2의 열린 문제를 JSON으로 수집 |
 | `scripts/trivy-to-nuclei.py` | Trivy 원본 JSON의 High/Critical CVE를 Nuclei template ID 입력 파일로 변환 |
 | `scripts/run-nuclei-validation.py` | Nuclei 기본 검사, Trivy CVE 조건부 검사, JSONL 통합과 coverage 결과 생성 |
-| `scripts/upload-sbom-to-dependency-track.py` | CycloneDX SBOM을 기존 DT 프로젝트 UUID에 업로드 |
+| `scripts/upload-sbom-to-dependency-track.py` | CycloneDX SBOM을 DT에 name/version + autoCreate로 업로드 |
 | `scripts/pin-cyclonedx-specversion.py` | CycloneDX `specVersion`을 1.6으로 고정 (DT 호환) |
 | `scripts/snapshot-dependency-scan-history.py` | dependency-scan latest → `history/<run_id>/` 스냅샷 |

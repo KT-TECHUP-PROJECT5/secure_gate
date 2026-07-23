@@ -90,7 +90,7 @@ Semgrep, Gitleaks, Trivy를 이용한 보안 검사를 구성하고, 각 도구�
 - [x] Trivy 원본 JSON 구조 확인 (`SchemaVersion == 2`)
 - [x] CycloneDX SBOM 생성 및 `bomFormat == "CycloneDX"` / `specVersion == "1.6"` 검증
 - [x] CycloneDX specVersion 1.6 고정 스크립트 (`scripts/pin-cyclonedx-specversion.py`)
-- [x] Dependency-Track UUID BOM 업로드 스크립트 (`scripts/upload-sbom-to-dependency-track.py`)
+- [x] Dependency-Track name/version + autoCreate BOM 업로드 (`scripts/upload-sbom-to-dependency-track.py`, `docs/dependency-track.md`)
 
 ### 3주차 완료 기준
 
