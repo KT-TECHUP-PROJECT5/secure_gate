@@ -177,12 +177,32 @@ jobs:
         run: |
           python3 -c 'import json; data=json.load(open("security/reports/dependency-report.json")); assert isinstance(data, dict); assert data.get("SchemaVersion") == 2'
 
+      - name: Generate CycloneDX SBOM
+        run: |
+          trivy fs \
+            --format cyclonedx \
+            --file-patterns "pip:requirements-legacy.txt" \
+            --output security/reports/sbom.cdx.json \
+            --no-progress \
+            .
+
+      - name: Validate CycloneDX SBOM
+        run: |
+          python3 -c 'import json; data=json.load(open("security/reports/sbom.cdx.json")); assert data.get("bomFormat") == "CycloneDX"; assert isinstance(data.get("components"), list)'
+
       - name: Upload dependency scan report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: dependency-report
           path: security/reports/dependency-report.json
+
+      - name: Upload CycloneDX SBOM
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-report
+          path: security/reports/sbom.cdx.json
 
   # ──────────────────────────────────────────
   # 4. Runtime Validation - D파트 연결 예정
