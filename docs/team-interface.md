@@ -138,10 +138,14 @@ steps:
 | Health Check Endpoint             | `HEALTH_CHECK_PATH=/posts`, 기대 상태 코드 `200` | D파트 기준 확정 |
 | Smoke Test 실행 경로              | `SMOKE_TEST_PATHS="/login=200,/posts=200,/upload=200\|303,/docs=200,/redoc=200"` | D파트 기준 확정 |
 | PR ZAP 실행 명령어                | `zap-baseline.py` 실행 후 `security/reports/zap-report.json` 저장 | D파트 전달 완료 / A파트 연결 필요 |
-| PR Nuclei 실행 명령어             | `medium,high,critical`, `xss`, `timeout 5m`, `rate-limit=10`, `c=5`, `retries=0`, `timeout=5`, `-ni` 기준으로 실행 후 `security/reports/nuclei-report.jsonl` 저장 | D파트 전달 완료 / A파트 연결 필요 |
+| PR Nuclei 실행 명령어             | `python3 scripts/run-nuclei-validation.py --target-url http://127.0.0.1:8000/posts --trivy-report security/reports/dependency-report.json`. 기본값은 `medium,high,critical`, `xss`, 전체 timeout 5분 | D파트 실행기 구현 완료 / A파트 연결 필요 |
 | Merge 이후 ZAP Full Scan          | ECS 배포와 Health Check 뒤 `zap-full-scan.py`, Spider 5분, Ajax Spider, 전체 timeout 30분으로 실행 | D파트 전달 완료 / A파트 CD 연결 필요 |
 | Merge 이후 Nuclei 광범위 스캔     | 태그 제한 없이 `low,medium,high,critical`, `rate-limit=20`, `c=10`, 전체 timeout 30분으로 실행 | D파트 전달 완료 / A파트 CD 연결 필요 |
-| Trivy CVE 기반 Nuclei 우선 검사   | C파트 `dependency-report` Artifact의 High/Critical CVE를 `scripts/trivy-to-nuclei.py`로 추출한 뒤 Nuclei `-id` 입력으로 사용 | D파트 구현 완료 / A파트 Artifact 연결 필요 |
+| Trivy CVE 기반 Nuclei 우선 검사   | `scripts/run-nuclei-validation.py`가 C파트 `dependency-report` Artifact의 High/Critical CVE 추출, `nuclei -tl` 사전 확인, 조건부 CVE 검사와 기본 결과 통합을 수행 | D파트 구현·검증 완료 / A파트 Artifact 다운로드 연결 필요 |
+| Trivy-Nuclei 결과 해석 기준       | `Trivy 후보 CVE 수 → Nuclei 매칭 템플릿 수 → Nuclei 실제 finding 수`를 구분. 매칭 템플릿 0개는 `passed`가 아니라 `skipped`, Trivy finding은 Gate에 유지 | D파트 기준 확정 / A·E파트 반영 필요 |
+| Trivy-Nuclei 수동 검증            | Next.js 포트폴리오 기준 Trivy 22건, High 8건, CVE 후보 5개, 매칭 템플릿 1개, 실제 finding 0개 확인 | D파트 검증 완료 |
+| Staging Nuclei 검증               | `http://www.securegate.n-e.kr/posts` 기준 Trivy CVE 후보 8개, 매칭 템플릿 0개, 기본 XSS finding 2개. CVE 검사는 `skipped: no-matching-nuclei-template` | D파트 검증 완료 |
+| Nuclei CVE coverage 파일          | `security/reports/nuclei-cve-coverage.json`에 후보 수, 매칭 템플릿 수, 기본/CVE/통합 finding 수와 skip/failure 사유 기록 | D파트 구현 완료 / A파트 Artifact 포함 필요 |
 | Custom Runtime Check              | `debug-exposure`, `docs-exposure`, `reflected-xss`, `search-sqli`, `admin-access`, `idor` | D파트 구현 완료 |
 | Dynatrace Environment             | `https://xlj20734.live.dynatrace.com`. OneAgent Code Module을 포함한 revision 2 배포, `initoneagent` exit code `0`, `web` RUNNING | 배포 정상 / Services 데이터 유입 추가 확인 필요 |
 | Dynatrace Synthetic Monitor       | `secure-gate-staging-health`, `GET /posts`, 5분, Busan, `environment:staging` / `service:secure-gate` | 생성 완료 / Success·Availability 100%·HTTP 200 확인 |
@@ -180,6 +184,7 @@ steps:
 | C - Scan history       | `security/reports/history/<run_id>/` (스냅샷 + `meta.json`) |
 | D - ZAP 원본           | `security/reports/zap-report.json`        |
 | D - Nuclei 원본        | `security/reports/nuclei-report.jsonl`    |
+| D - Nuclei CVE coverage | `security/reports/nuclei-cve-coverage.json` |
 | D - Dynatrace 원본     | `security/reports/dynatrace-problems.json` |
 | D - Runtime Validation | `security/reports/runtime-report.json`    |
 | A - Summary            | `security/reports/security-summary.json`  |

@@ -198,7 +198,8 @@ uses: KT-TECHUP-PROJECT5/secure_gate/.github/workflows/pr-security-gate.yml@v1
 │   ├── create-pr-comment.py           # PR 댓글 자동 작성
 │   ├── runtime-validation.py          # D파트 Runtime Validation 제출본
 │   ├── fetch-dynatrace-problems.py    # Dynatrace Problems API 결과 수집
-│   └── trivy-to-nuclei.py             # Trivy High/Critical CVE를 Nuclei 입력으로 변환
+│   ├── trivy-to-nuclei.py             # Trivy High/Critical CVE를 Nuclei 입력으로 변환
+│   └── run-nuclei-validation.py       # Nuclei 기본/CVE 검사 및 결과 통합
 │
 ├── security/
 │   ├── policies/

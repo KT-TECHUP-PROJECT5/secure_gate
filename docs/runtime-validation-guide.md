@@ -45,10 +45,10 @@ D파트는 Workflow YAML을 직접 수정하지 않고, 아래 실행 방식과 
 | PR ZAP 실행 명령어 | 아래 `PR 임시 환경에서 ZAP 실행`의 `zap-baseline.py` 명령어를 사용한다. |
 | Merge 이후 ZAP 실행 명령어 | ECS 배포와 Health Check 성공 후 아래 `Merge 이후 Staging Full Scan`의 `zap-full-scan.py` 명령어를 사용한다. |
 | ZAP 결과 파일 경로 | `security/reports/zap-report.json` |
-| PR Nuclei 실행 명령어 | 아래 `PR 임시 환경에서 Nuclei 실행` 명령어를 사용한다. PR 기본값은 `medium,high,critical`, `xss`, `timeout 5m`이다. |
+| PR Nuclei 실행 명령어 | `python3 scripts/run-nuclei-validation.py --target-url http://127.0.0.1:8000/posts --trivy-report security/reports/dependency-report.json`. PR 기본값은 `medium,high,critical`, `xss`, 전체 timeout 5분이다. |
 | Merge 이후 Nuclei 실행 명령어 | 태그 제한 없이 기본 서명 템플릿을 `low,medium,high,critical` 범위로 실행한다. 전체 timeout은 30분이다. |
-| Nuclei 결과 파일 경로 | `security/reports/nuclei-report.jsonl` |
-| Trivy CVE 연동 | C파트 `dependency-scan` Job이 생성한 원본 `security/reports/dependency-report.json` Artifact에서 High/Critical CVE를 추출하고 Nuclei `-id` 입력으로 사용한다. A파트가 Artifact 다운로드와 실행 순서를 연결해야 한다. |
+| Nuclei 결과 파일 경로 | 통합 finding은 `security/reports/nuclei-report.jsonl`, CVE 검사 수행 상태는 `security/reports/nuclei-cve-coverage.json` |
+| Trivy CVE 연동 | C파트 `dependency-scan` Job이 생성한 원본 `security/reports/dependency-report.json` Artifact를 A파트가 다운로드한다. `run-nuclei-validation.py`가 High/Critical CVE 추출, 템플릿 사전 확인, 조건부 검사와 결과 통합을 수행한다. |
 | Dynatrace 실행 방식 | ECS Service는 OneAgent Code Module이 포함된 `secure-gate-dast:2`를 실행 중이다. `initoneagent` 종료 코드 `0`, `web` RUNNING, ALB Target healthy를 확인했다. Dynatrace `Services`의 APM 데이터 유입은 별도 확인이 필요하다. |
 | Dynatrace 설정값 | Environment URL은 `https://xlj20734.live.dynatrace.com`, selector는 `status("open"),entityTags("environment:staging")`이다. ECS 설치용 PaaS Token과 Problems API용 `problems.read` 토큰은 분리한다. |
 | Dynatrace 결과 파일 경로 | 원본은 `security/reports/dynatrace-problems.json`, 공통 스키마 통합 결과는 `security/reports/runtime-report.json`이다. |
@@ -351,6 +351,7 @@ timeout 30m docker run --rm \
   -stats \
   -stats-interval 30 \
   -jsonl \
+  -omit-raw \
   -o /app/reports/nuclei-report.jsonl
 NUCLEI_EXIT_CODE=$?
 set -e
@@ -473,26 +474,24 @@ docker run --rm \
 ### 4. PR 임시 환경에서 Nuclei 기본 검사
 
 ```bash
-: > security/reports/nuclei-base-report.jsonl
-
-timeout 5m docker run --rm \
-  --network host \
-  -v "$GITHUB_WORKSPACE/security/reports:/app/reports:rw" \
-  projectdiscovery/nuclei:latest \
-  -u http://127.0.0.1:8000/posts \
-  -severity medium,high,critical \
-  -tags xss \
-  -rate-limit 10 \
-  -c 5 \
-  -retries 0 \
-  -timeout 5 \
-  -ni \
-  -jsonl \
-  -o /app/reports/nuclei-base-report.jsonl \
-  -silent || true
+python3 scripts/run-nuclei-validation.py \
+  --target-url http://127.0.0.1:8000/posts \
+  --trivy-report security/reports/dependency-report.json \
+  --reports-dir security/reports
 ```
 
-기본 검사는 애플리케이션 코드에서 발생한 일반 XSS처럼 CVE 번호가 없는 취약점을 검사한다. Trivy CVE 우선 검사는 이 기본 검사를 대체하지 않고 다음 단계에서 추가로 실행한다.
+이 명령 하나가 다음 작업을 순서대로 수행한다.
+
+```text
+Nuclei 기본 XSS 검사
+-> Trivy High/Critical CVE 추출
+-> 설치된 Nuclei 템플릿 사전 확인
+-> 매칭 템플릿이 있을 때만 CVE 우선 검사
+-> 기본 결과와 CVE 결과를 nuclei-report.jsonl로 통합
+-> nuclei-cve-coverage.json에 후보·템플릿·finding 수 기록
+```
+
+기본 검사는 애플리케이션 코드에서 발생한 일반 XSS처럼 CVE 번호가 없는 취약점을 검사한다. Trivy CVE 우선 검사는 이 기본 검사를 대체하지 않는다. 아래 5~6절은 실행기 내부 동작과 개별 확인 명령을 설명한다.
 
 ### 5. Trivy 결과를 Nuclei 입력으로 변환
 
@@ -507,14 +506,15 @@ python3 scripts/trivy-to-nuclei.py \
 
 C파트의 확정 원본 경로는 `security/reports/dependency-report.json`, Artifact 이름은 `dependency-report`다. 이 스크립트는 팀 공통 스키마로 변환된 보고서가 아니라 `SchemaVersion: 2`와 `Results` 배열이 있는 Trivy 원본 JSON을 입력으로 받는다.
 
-`dependency-scan`과 `runtime-validation`은 서로 다른 Runner에서 실행되므로 저장소에 파일이 자동으로 공유되지 않는다. A파트는 `runtime-validation` Job이 `dependency-scan`을 기다리게 하고 `dependency-report` Artifact를 다운로드한 뒤 변환 스크립트를 실행해야 한다.
+`dependency-scan`과 `runtime-validation`은 서로 다른 Runner에서 실행되므로 저장소에 파일이 자동으로 공유되지 않는다. A파트는 `runtime-validation` Job이 `dependency-scan`을 기다리게 하고 `dependency-report` Artifact를 다운로드한 뒤 `run-nuclei-validation.py`를 실행해야 한다. 이 실행기가 내부에서 변환 스크립트를 호출한다.
 
 ```text
 dependency-scan Job
 -> dependency-report Artifact 업로드
 runtime-validation Job
 -> dependency-report Artifact 다운로드
--> trivy-to-nuclei.py 실행
+-> run-nuclei-validation.py 실행
+-> 내부에서 trivy-to-nuclei.py 호출
 ```
 
 생성 예시:
@@ -526,34 +526,58 @@ CVE-2023-30861
 
 Nuclei는 `-id` 옵션에서 쉼표 목록뿐 아니라 파일도 받을 수 있으므로 이 파일을 그대로 전달할 수 있다.
 
+Trivy와 Nuclei의 결과는 다음 세 단계로 구분한다.
+
+```text
+Trivy 후보 CVE 수
+-> 설치된 Nuclei 템플릿과 일치하는 CVE 수
+-> 실행 환경에서 Nuclei가 실제 탐지한 CVE 수
+```
+
+Trivy 후보가 존재해도 Nuclei 템플릿이 없을 수 있고, 템플릿이 있어도 실행 환경에서 취약 기능이 노출되지 않으면 실제 finding은 발생하지 않을 수 있다. 따라서 세 수치를 같은 의미로 해석하면 안 된다.
+
 ### 6. Trivy CVE 우선 Nuclei 검사
 
 ```bash
 : > security/reports/nuclei-cve-report.jsonl
+: > security/reports/nuclei-cve-matched-templates.txt
 
 if [ -s security/reports/nuclei-cve-ids.txt ]; then
-  timeout 5m docker run --rm \
-    --network host \
-    -v "$GITHUB_WORKSPACE/security/reports:/app/reports:rw" \
+  docker run --rm \
+    -v "$GITHUB_WORKSPACE/security/reports:/app/reports:ro" \
     projectdiscovery/nuclei:latest \
-    -u http://127.0.0.1:8000/posts \
     -id /app/reports/nuclei-cve-ids.txt \
-    -rate-limit 10 \
-    -c 5 \
-    -retries 0 \
-    -timeout 5 \
-    -ni \
-    -jsonl \
-    -o /app/reports/nuclei-cve-report.jsonl \
-    -silent || true
+    -tl \
+    -silent \
+    > security/reports/nuclei-cve-matched-templates.txt
+
+  if [ -s security/reports/nuclei-cve-matched-templates.txt ]; then
+    timeout 5m docker run --rm \
+      --network host \
+      -v "$GITHUB_WORKSPACE/security/reports:/app/reports:rw" \
+      projectdiscovery/nuclei:latest \
+      -u http://127.0.0.1:8000/posts \
+      -id /app/reports/nuclei-cve-ids.txt \
+      -rate-limit 10 \
+      -c 5 \
+      -retries 0 \
+      -timeout 5 \
+      -ni \
+      -jsonl \
+      -omit-raw \
+      -o /app/reports/nuclei-cve-report.jsonl \
+      -silent || true
+  else
+    echo "Trivy CVE-targeted Nuclei scan skipped: no matching Nuclei template"
+  fi
+else
+  echo "Trivy CVE-targeted Nuclei scan skipped: no High/Critical CVE candidate"
 fi
 ```
 
-여기서는 Nuclei `-severity`를 다시 적용하지 않는다. 우선순위는 이미 Trivy의 High/Critical 기준으로 결정됐고, 같은 CVE라도 Nuclei 템플릿의 severity 표기가 다를 수 있기 때문이다.
+`nuclei-cve-matched-templates.txt`는 실제 실행 가능한 Nuclei 템플릿 경로 목록이다. 이 파일이 비어 있으면 CVE 우선 검사는 `passed`가 아니라 `skipped: no-matching-nuclei-template`로 기록한다. 이 경우에도 Trivy의 High/Critical finding은 제거하지 않고 Aggregator와 Policy Evaluator에 그대로 전달한다.
 
-`nuclei-cve-report.jsonl`이 비어 있어도 해당 CVE가 안전하다는 뜻은 아니다. 해당 CVE용 Nuclei 템플릿이 없거나, 취약 패키지가 HTTP 경로로 노출되지 않았거나, 인증과 경로 정보가 부족할 수 있다.
-
-실행 전에 현재 Nuclei 템플릿이 CVE ID를 지원하는지 다음 명령으로 확인할 수 있다. CVE ID가 출력되지 않으면 해당 목록과 일치하는 공식 템플릿이 없는 상태다.
+템플릿 존재 여부만 별도로 확인하려면 다음 명령을 사용한다.
 
 ```bash
 docker run --rm \
@@ -564,7 +588,28 @@ docker run --rm \
   -silent
 ```
 
-기본 검사와 CVE 우선 검사의 결과는 A파트 Workflow에서 최종 `security/reports/nuclei-report.jsonl`로 합친 뒤 Runtime Validation에 전달한다.
+여기서는 Nuclei `-severity`를 다시 적용하지 않는다. 우선순위는 이미 Trivy의 High/Critical 기준으로 결정됐고, 같은 CVE라도 Nuclei 템플릿의 severity 표기가 다를 수 있기 때문이다.
+
+`nuclei-cve-report.jsonl`이 비어 있어도 해당 CVE가 안전하다는 뜻은 아니다. 다음 중 하나일 수 있다.
+
+- 해당 CVE용 Nuclei 템플릿이 없음
+- 취약 패키지가 실행 중인 HTTP 경로에 노출되지 않음
+- 인증, 특정 파라미터 또는 클라우드 런타임 조건이 충족되지 않음
+- Nuclei matcher가 요구하는 증거가 응답에 나타나지 않음
+
+수동 검증에서 팀원 Next.js 포트폴리오를 대상으로 다음 결과를 확인했다.
+
+```text
+Trivy 전체 취약점: 22
+Trivy High: 8
+High 중 CVE 형식 후보: 5
+Nuclei 매칭 템플릿: 1
+Nuclei 실제 finding: 0
+```
+
+매칭된 `CVE-2026-44578` 템플릿은 Next.js WebSocket Upgrade Handler SSRF를 검사한다. 로컬 실행 환경에는 AWS/GCP/DigitalOcean 메타데이터 응답이 없어 finding이 발생하지 않았다. 이 결과는 Trivy finding이 오탐이라는 뜻이 아니라, 현재 실행 환경에서 Nuclei가 동적 악용 증거를 확인하지 못했다는 뜻이다.
+
+`run-nuclei-validation.py`는 기본 검사와 CVE 우선 검사 결과를 최종 `security/reports/nuclei-report.jsonl`로 합친 뒤 Runtime Validation에 전달한다.
 
 ```bash
 : > security/reports/nuclei-report.jsonl
@@ -577,6 +622,24 @@ for report in \
   fi
 done
 ```
+
+동시에 다음 상태 파일을 생성한다.
+
+```text
+security/reports/nuclei-cve-coverage.json
+```
+
+Staging `http://www.securegate.n-e.kr/posts`와 C파트 Trivy 결과로 검증한 결과는 다음과 같다.
+
+```text
+Trivy High/Critical CVE 후보: 8
+Nuclei 매칭 템플릿: 0
+Nuclei CVE finding: 0
+Nuclei 기본 XSS finding: 2
+최종 상태: skipped (no-matching-nuclei-template)
+```
+
+여기서 `skipped`는 CVE 우선 검사에 대한 상태다. 기본 Nuclei 검사는 정상 수행됐고 Medium `xss-fuzz`, High `top-xss-params`가 탐지됐다.
 
 ### 7. Runtime Validation 실행
 
@@ -640,12 +703,12 @@ Wait for dependency-scan Job
 -> dependency-report Artifact 다운로드
 Run ZAP Baseline
 -> security/reports/zap-report.json 생성
-Run Nuclei Scan
+Run scripts/run-nuclei-validation.py
+-> 기본 Nuclei 검사
+-> Trivy High/Critical CVE 추출과 템플릿 사전 확인
+-> 매칭 템플릿이 있을 때 CVE 우선 검사
 -> security/reports/nuclei-report.jsonl 생성
-Extract Trivy High/Critical CVEs
--> security/reports/nuclei-cve-ids.txt 생성
-Run Nuclei CVE-targeted Scan
--> 기본 Nuclei 결과와 CVE 우선 결과 통합
+-> security/reports/nuclei-cve-coverage.json 생성
 Fixed Staging이면 fetch-dynatrace-problems.py 실행
 -> security/reports/dynatrace-problems.json 생성
 -> python scripts/runtime-validation.py 실행
@@ -668,6 +731,12 @@ Fixed Staging이면 fetch-dynatrace-problems.py 실행
 | `NUCLEI_RETRIES` | 실패 요청 재시도 횟수. PR 단계에서는 지연을 줄이기 위해 재시도하지 않음 | `0` |
 | `NUCLEI_TIMEOUT_SECONDS` | Nuclei 요청 timeout | `5` |
 | `NUCLEI_SCAN_TIMEOUT` | PR 단계 Nuclei 전체 실행 제한 시간 | `5m` |
+| `NUCLEI_TEMPLATE_LIST_TIMEOUT` | CVE 대응 템플릿 목록 확인 제한 시간 | `2m` |
+| `NUCLEI_DOCKER_NETWORK` | Nuclei Docker 네트워크. Linux Runner의 임시 앱은 `host`, 외부 URL은 `none` 사용 가능 | `host` |
+| `NUCLEI_TEMPLATE_VOLUME` | 다운로드한 Nuclei 템플릿을 재사용할 Docker volume. `none`이면 비활성화 | `secure-gate-nuclei-templates` |
+| `TRIVY_REPORT_PATH` | C파트 Trivy 원본 JSON 경로 | `security/reports/dependency-report.json` |
+| `TRIVY_NUCLEI_SEVERITIES` | CVE 우선 검사 후보로 추출할 Trivy severity | `HIGH,CRITICAL` |
+| `SECURITY_REPORTS_DIR` | Nuclei 중간·통합 결과 파일을 저장할 디렉터리 | `security/reports` |
 | `RUNTIME_BASE_URL` | PR 단계 Runtime Validation 대상 URL | 없음 |
 | `STAGING_URL` | `RUNTIME_BASE_URL`이 없을 때 사용할 Staging URL | 없음 |
 | `HEALTH_CHECK_PATH` | Health Check 경로 | `/health` |
@@ -724,7 +793,12 @@ security/reports/runtime-report.json
 
 ```text
 security/reports/zap-report.json
+security/reports/nuclei-base-report.jsonl
+security/reports/nuclei-cve-report.jsonl
 security/reports/nuclei-report.jsonl
+security/reports/nuclei-cve-ids.txt
+security/reports/nuclei-cve-matched-templates.txt
+security/reports/nuclei-cve-coverage.json
 security/reports/dynatrace-problems.json
 ```
 
@@ -809,28 +883,16 @@ Nuclei는 GitHub Actions에서 Docker로 실행하고, JSONL 결과를 아래 �
 security/reports/nuclei-report.jsonl
 ```
 
-Workflow 예시:
+권장 실행 명령:
 
 ```bash
-: > security/reports/nuclei-report.jsonl
-
-timeout "${NUCLEI_SCAN_TIMEOUT:-5m}" docker run --rm \
-  -v "$GITHUB_WORKSPACE/security/reports:/app/reports:rw" \
-  projectdiscovery/nuclei:latest \
-  -u "${NUCLEI_TARGET_URL:-${ZAP_TARGET_URL:-$RUNTIME_BASE_URL}}" \
-  -severity "${NUCLEI_SEVERITIES:-medium,high,critical}" \
-  -tags "${NUCLEI_TAGS:-xss}" \
-  -rate-limit "${NUCLEI_RATE_LIMIT:-10}" \
-  -c "${NUCLEI_CONCURRENCY:-5}" \
-  -retries "${NUCLEI_RETRIES:-0}" \
-  -timeout "${NUCLEI_TIMEOUT_SECONDS:-5}" \
-  -ni \
-  -jsonl \
-  -o /app/reports/nuclei-report.jsonl \
-  -silent || true
+python3 scripts/run-nuclei-validation.py \
+  --target-url "${NUCLEI_TARGET_URL:-${ZAP_TARGET_URL:-$RUNTIME_BASE_URL}}" \
+  --trivy-report "${TRIVY_REPORT_PATH:-security/reports/dependency-report.json}" \
+  --reports-dir "${SECURITY_REPORTS_DIR:-security/reports}"
 ```
 
-`runtime-validation.py`는 이 JSONL을 한 줄씩 읽어 `runtime.nuclei.<template-id>` finding으로 변환한다. Nuclei의 `critical/high/medium/low`는 그대로 매핑하고, `info/unknown`은 팀 공통 schema에 맞춰 `low`로 기록한다. PR 단계 기본값은 필수 탐지 범위를 유지하기 위해 `medium,high,critical` severity와 `xss` 태그를 사용한다. 대신 `timeout 5m`, `-retries 0`, `-timeout 5`, `-rate-limit 10`, `-c 5`, `-ni`로 실행 시간을 제어한다. `exposure,misconfig,cves` 같은 넓은 태그 확장은 PR 게이트가 아니라 별도 정밀 점검이나 merge 이후 staging 검증에서 수행한다.
+실행기는 기본 검사, Trivy CVE 추출, 템플릿 사전 확인, 조건부 CVE 검사와 JSONL 통합을 한 번에 처리한다. `runtime-validation.py`는 통합 JSONL을 한 줄씩 읽어 `runtime.nuclei.<template-id>` finding으로 변환한다. Nuclei의 `critical/high/medium/low`는 그대로 매핑하고, `info/unknown`은 팀 공통 schema에 맞춰 `low`로 기록한다. PR 단계 기본값은 `medium,high,critical`, `xss`, 전체 timeout 5분, 요청 timeout 5초, `rate-limit 10`, concurrency 5, retries 0, Interactsh 비활성화다. 원본 HTTP 요청·응답은 `-omit-raw`로 제외해 Artifact 크기와 민감정보 노출 가능성을 줄인다.
 
 ---
 

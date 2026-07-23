@@ -211,6 +211,7 @@ scripts/
   runtime-validation.py
   fetch-dynatrace-problems.py
   trivy-to-nuclei.py
+  run-nuclei-validation.py
 
 docs/
   pipeline-guide.md

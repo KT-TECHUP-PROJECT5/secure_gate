@@ -296,7 +296,11 @@ security/reports/
   history/<run_id>/         # Dependency Scan 실행 스냅샷 (C파트)
   zap-report.json           # OWASP ZAP 원본 JSON (D파트 중간 입력)
   nuclei-cve-ids.txt        # Trivy High/Critical CVE에서 만든 Nuclei template ID 입력
+  nuclei-cve-matched-templates.txt # 설치된 Nuclei 템플릿 사전 확인 결과
+  nuclei-base-report.jsonl  # Nuclei 기본 검사 결과
+  nuclei-cve-report.jsonl   # Trivy CVE 우선 검사 결과
   nuclei-report.jsonl       # Nuclei 원본 JSONL (D파트 중간 입력)
+  nuclei-cve-coverage.json  # CVE 후보/템플릿/finding coverage 상태
   dynatrace-problems.json   # Dynatrace Problems API 원본 JSON (D파트 중간 입력)
   runtime-report.json       # Runtime Validation 결과 (D파트)
   security-summary.json     # Aggregator 통합 결과
@@ -361,6 +365,7 @@ security/reports/
 | `scripts/runtime-validation.py` | Health / Smoke / Header / Custom Check / ZAP / Nuclei / Dynatrace 결과를 `runtime-report.json`으로 생성 |
 | `scripts/fetch-dynatrace-problems.py` | Dynatrace Problems API v2의 열린 문제를 JSON으로 수집 |
 | `scripts/trivy-to-nuclei.py` | Trivy 원본 JSON의 High/Critical CVE를 Nuclei template ID 입력 파일로 변환 |
+| `scripts/run-nuclei-validation.py` | Nuclei 기본 검사, Trivy CVE 조건부 검사, JSONL 통합과 coverage 결과 생성 |
 | `scripts/upload-sbom-to-dependency-track.py` | CycloneDX SBOM을 기존 DT 프로젝트 UUID에 업로드 |
 | `scripts/pin-cyclonedx-specversion.py` | CycloneDX `specVersion`을 1.6으로 고정 (DT 호환) |
 | `scripts/snapshot-dependency-scan-history.py` | dependency-scan latest → `history/<run_id>/` 스냅샷 |

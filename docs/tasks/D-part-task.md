@@ -2,7 +2,7 @@
 문서명: D파트 Runtime Validation 작업 체크리스트
 최신화: 2026-07-23
 작성자: D파트
-Version: 1.7.0
+Version: 1.9.0
 ---
 
 # D파트 Runtime Validation 작업 체크리스트
@@ -23,6 +23,10 @@ D파트는 실행 중인 테스트/Staging 환경을 대상으로 런타임 보�
 - [x] OWASP ZAP JSON 결과 파싱 구현
 - [x] Nuclei JSONL 결과 파싱 구현
 - [x] Trivy High/Critical CVE를 Nuclei template ID 입력으로 변환하는 스크립트 구현
+- [x] Nuclei `-tl` 기반 CVE 템플릿 사전 확인 및 템플릿 0개 처리 기준 작성
+- [x] Nuclei 기본 검사, Trivy CVE 조건부 검사와 결과 통합 실행기 구현: `scripts/run-nuclei-validation.py`
+- [x] 외부 Next.js 포트폴리오로 Trivy-Nuclei 수동 연동 검증
+- [x] 공용 Staging에서 통합 실행기 검증: 기본 XSS 2건, CVE 후보 8개, 매칭 템플릿 0개
 - [x] Dynatrace Problems API v2 결과 수집 스크립트 구현
 - [x] Dynatrace 열린 문제를 공통 Runtime finding으로 변환
 - [x] 공통 결과 스키마 그대로 출력 구현
@@ -50,6 +54,8 @@ D파트는 실행 중인 테스트/Staging 환경을 대상으로 런타임 보�
 - [ ] Nuclei OAST, Headless, Fuzzing 별도 정밀 검사 사용 여부 확정
 - [x] C파트 Trivy 원본 JSON 경로 확정: `security/reports/dependency-report.json`
 - [ ] A파트의 `dependency-report` Artifact 다운로드와 D파트 Job 연결 확인
+- [ ] A파트의 `run-nuclei-validation.py` 실행 step 연결 확인
+- [ ] Trivy High/Critical finding이 Nuclei 결과와 관계없이 Aggregator에 유지되는지 확인
 - [x] 기존 ECS Service가 OneAgent 없는 `secure-gate-dast:1`을 사용한 상태 확인
 - [x] ECS Fargate OneAgent application-only 연동 방식 확정
 - [x] OneAgent 설정이 포함된 `secure-gate-dast:2` 등록 확인
@@ -80,6 +86,8 @@ D파트는 실행 중인 테스트/Staging 환경을 대상으로 런타임 보�
 | `NUCLEI_RETRIES` | `0` |
 | `NUCLEI_TIMEOUT_SECONDS` | `5` |
 | `NUCLEI_SCAN_TIMEOUT` | `5m` |
+| `NUCLEI_TEMPLATE_LIST_TIMEOUT` | `2m` |
+| `NUCLEI_TEMPLATE_VOLUME` | `secure-gate-nuclei-templates` |
 | Merge 이후 ZAP | `zap-full-scan.py`, Spider 5분, Ajax Spider 포함, 전체 timeout 30분 |
 | Merge 이후 Nuclei | 태그 제한 없음, `low,medium,high,critical`, `rate-limit=20`, `c=10`, 전체 timeout 30분 |
 | `RUNTIME_BASE_URL` | PR 임시 환경: `http://127.0.0.1:8000` |
@@ -108,6 +116,9 @@ D파트는 실행 중인 테스트/Staging 환경을 대상으로 런타임 보�
 | ECS OneAgent Secret Key | `DT_PAAS_TOKEN`, `DT_TENANTTOKEN`, `DT_CONNECTION_POINT` |
 | Trivy 원본 JSON | `security/reports/dependency-report.json`, Artifact `dependency-report` |
 | Nuclei CVE ID 입력 | `security/reports/nuclei-cve-ids.txt` |
+| Nuclei CVE 매칭 템플릿 | `security/reports/nuclei-cve-matched-templates.txt` |
+| Nuclei CVE 결과 | `security/reports/nuclei-cve-report.jsonl` |
+| Nuclei CVE 실행 상태 | `security/reports/nuclei-cve-coverage.json` |
 
 ---
 
@@ -124,7 +135,9 @@ D파트는 실행 중인 PR 임시 환경 또는 Staging URL을 검사하는 명
 - Nuclei 실행 명령어와 결과 파일 경로
 - Merge 이후 ZAP Full Scan과 Nuclei 광범위 스캔의 순차 실행 명령어
 - Post-deploy 실패 시 Production 승격 차단 또는 rollback 연결 기준
-- Trivy `dependency-report` Artifact 다운로드와 CVE 우선 Nuclei 실행 명령어
+- Trivy `dependency-report` Artifact 다운로드 후 `scripts/run-nuclei-validation.py` 실행 명령어
+- Nuclei `-tl` 템플릿 사전 확인, 템플릿 0개 시 `skipped` 처리 기준
+- Trivy finding을 Nuclei 탐지 여부와 관계없이 Aggregator에 유지하는 기준
 - Dynatrace Environment URL, selector, Secret 이름과 Problems API 수집 명령어
 - Dynatrace 원본 결과 파일 경로와 severity 매핑 기준
 - Runtime Validation 실행 명령어와 결과 파일 경로
@@ -135,6 +148,17 @@ D파트는 실행 중인 PR 임시 환경 또는 Staging URL을 검사하는 명
 ---
 
 ## 로컬 검증 명령어
+
+Nuclei 기본 검사와 Trivy CVE 우선 검사를 함께 실행한다.
+
+```bash
+python3 scripts/run-nuclei-validation.py \
+  --target-url http://127.0.0.1:8000/posts \
+  --trivy-report security/reports/dependency-report.json \
+  --reports-dir security/reports
+```
+
+이후 통합 Runtime Validation을 실행한다.
 
 ```bash
 RUNTIME_BASE_URL=http://127.0.0.1:8000 \
@@ -167,7 +191,12 @@ security/reports/runtime-report.json
 - Merge 이후 두 스캐너는 Staging 부하를 고려해 ZAP 다음 Nuclei 순서로 실행하고 각 스캔의 전체 timeout을 30분으로 제한한다.
 - 배포 후 finding은 이미 완료된 Merge를 취소하지 않고, Post-deploy Job 실패와 다음 환경 승격 차단 또는 rollback 판단에 사용한다.
 - `trivy-to-nuclei.py`는 Trivy 원본 JSON에서 High/Critical CVE만 중복 제거하여 Nuclei `-id` 입력 파일로 만든다.
-- C파트 결과는 `dependency-report` Artifact로 전달되므로 A파트가 D파트 Job에서 다운로드한 뒤 변환 스크립트를 실행해야 한다.
+- `run-nuclei-validation.py`는 기본 검사, Trivy CVE 추출, 템플릿 사전 확인, 조건부 CVE 검사, JSONL 통합과 coverage 상태 생성을 수행한다.
+- C파트 결과는 `dependency-report` Artifact로 전달되므로 A파트가 D파트 Job에서 다운로드한 뒤 `run-nuclei-validation.py`를 실행해야 한다.
+- Trivy-Nuclei 연동 결과는 `Trivy 후보 CVE 수`, `Nuclei 매칭 템플릿 수`, `Nuclei 실제 finding 수`로 나누어 설명한다.
+- Nuclei 매칭 템플릿이 0개이면 취약점이 없거나 검사를 통과한 것이 아니라 `skipped: no-matching-nuclei-template`로 처리한다.
+- Next.js 포트폴리오 수동 검증에서 Trivy 22건, High 8건, CVE 후보 5개, 매칭 템플릿 1개, 실제 finding 0개를 확인했다.
+- 공용 Staging 검증에서 Trivy CVE 후보 8개, 매칭 템플릿 0개, 기본 Nuclei XSS finding 2개를 확인했다.
 - CVE 우선 검사는 일반 XSS 등 CVE 번호가 없는 취약점을 대신하지 않으므로 기존 Nuclei 기본 검사와 함께 실행한다.
 - ZAP 결과는 `security/reports/zap-report.json`을 읽어 `runtime.zap.<pluginid>` finding으로 변환한다.
 - Nuclei 결과는 `security/reports/nuclei-report.jsonl`을 읽어 `runtime.nuclei.<template-id>` finding으로 변환한다.
