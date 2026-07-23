@@ -109,11 +109,9 @@ steps:
 | 항목                           | 내용                                      | 상태       |
 | ------------------------------ | ----------------------------------------- | ---------- |
 | SAST 기본 도구                 | Semgrep (CodeQL 비교 후 미선정)           | 확정       |
-| Semgrep 실행 명령어            | `semgrep scan --config auto . --json --output security/reports/sast-report.json` | 확정       |
-| Semgrep 설정 파일 경로         | 별도 파일 없음 (`--config auto`)                                                | 초기 확정  |
-| SAST 결과 파일 경로            | `security/reports/sast-report.json`                                             | A파트 고정 |
-| Gitleaks 실행 명령어           | `gitleaks git . --report-format json --report-path security/reports/secret-report.json --redact=100 --exit-code 0 --no-banner` | 확정       |
-| Secret Scan 결과 파일 경로     | `security/reports/secret-report.json`     | A파트 고정 |
+| Semgrep 실행 명령어            | `semgrep scan --config auto --config p/secrets --config r/python.flask.security.xss.audit.template-unescaped-with-safe.template-unescaped-with-safe . --json --output security/reports/sast-report.json` | 확정       |
+| Semgrep 설정 파일 경로         | 별도 파일 없음 (Registry 설정 사용)                                             | 확정       |
+| SAST + Secret Scan 결과 파일 경로 | `security/reports/sast-report.json`                                          | A파트 고정 |
 | Trivy 실행 명령어              | `trivy fs --scanners vuln --file-patterns "pip:requirements-legacy.txt" --format json --output security/reports/dependency-report.json --exit-code 0 --no-progress .` | 확정       |
 | Dependency Scan 결과 파일 경로 | `security/reports/dependency-report.json` | A파트 고정 |
 | SBOM 형식                      | CycloneDX (Trivy 생성, CVE 보고서와 역할 분리) | 확정    |
@@ -159,8 +157,7 @@ steps:
 
 | 파트                   | 결과 파일 경로                            |
 | ---------------------- | ----------------------------------------- |
-| C - SAST               | `security/reports/sast-report.json`       |
-| C - Secret Scan        | `security/reports/secret-report.json`     |
+| C - SAST + Secret Scan | `security/reports/sast-report.json`       |
 | C - Dependency Scan    | `security/reports/dependency-report.json` |
 | D - Runtime Validation | `security/reports/runtime-report.json`    |
 | A - Summary            | `security/reports/security-summary.json`  |
