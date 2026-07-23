@@ -1,8 +1,8 @@
 ---
 문서명: C파트 작업 체크리스트
-최신화: 2026-07-02
+최신화: 2026-07-23
 담당: C. Security Scan
-Version: 1.2.0
+Version: 1.3.0
 ---
 
 # C파트 작업 체크리스트
@@ -81,13 +81,16 @@ Semgrep, Gitleaks, Trivy를 이용한 보안 검사를 구성하고, 각 도구�
 
 ### Dependency Scan — Trivy
 
-- [ ] Trivy 설치 및 버전 확인
-- [ ] 프로젝트 패키지 파일 확인 (`requirements.txt`, `package-lock.json` 등)
-- [ ] Trivy 검사 대상 및 실행 방식 확정
-- [ ] Trivy 실행 명령어 확정
+- [x] Trivy 설치 및 버전 확인 (`0.70.0` pin + checksum)
+- [x] 프로젝트 패키지 파일 확인 (`requirements.txt`, `package-lock.json` 등)
+- [x] Trivy 검사 대상 및 실행 방식 확정 (Dockerfile 있으면 `image`, 없으면 `fs`)
+- [x] Trivy 실행 명령어 확정 (CVE JSON + CycloneDX SBOM 분리)
 - [ ] 취약 의존성 탐지 테스트
 - [ ] 정상 의존성 또는 탐지 없음 테스트
-- [ ] Trivy 원본 JSON 구조 확인
+- [x] Trivy 원본 JSON 구조 확인 (`SchemaVersion == 2`)
+- [x] CycloneDX SBOM 생성 및 `bomFormat == "CycloneDX"` / `specVersion == "1.6"` 검증
+- [x] CycloneDX specVersion 1.6 고정 스크립트 (`scripts/pin-cyclonedx-specversion.py`)
+- [x] Dependency-Track UUID BOM 업로드 스크립트 (`scripts/upload-sbom-to-dependency-track.py`)
 
 ### 3주차 완료 기준
 
@@ -101,19 +104,20 @@ Semgrep, Gitleaks, Trivy를 이용한 보안 검사를 구성하고, 각 도구�
 
 ### Trivy 원본 결과 연동
 
-- [ ] Trivy 원본 JSON 구조 검증
-- [ ] `security/reports/dependency-report.json` 생성 확인
-- [ ] `dependency-report` Artifact 업로드 확인
+- [x] Trivy 원본 JSON 구조 검증
+- [x] `security/reports/dependency-report.json` 생성 확인
+- [x] `dependency-report` Artifact 업로드 확인
+- [x] `sbom` / `dependency-track-upload-report` Artifact 추가
 
 ### Workflow Job 교체
 
 - [x] `sast` Job의 Placeholder를 Semgrep 실제 명령어로 교체
-- [ ] `secret-scan` Job의 Placeholder를 Gitleaks 실제 명령어로 교체
-- [ ] `dependency-scan` Job의 Placeholder를 Trivy 실제 명령어로 교체
-- [ ] 각 Job에서 필요한 도구 설치 단계 추가
-- [ ] 각 Job에서 도구별 원본 JSON 생성
+- [x] `secret-scan` Job의 Placeholder를 Gitleaks 실제 명령어로 교체
+- [x] `dependency-scan` Job의 Placeholder를 Trivy 실제 명령어로 교체
+- [x] 각 Job에서 필요한 도구 설치 단계 추가
+- [x] 각 Job에서 도구별 원본 JSON 생성
 - [ ] 각 결과 파일의 Artifact 업로드 확인
-- [ ] 스캐너가 finding을 탐지해도 결과 파일이 먼저 생성되도록 종료 코드 처리
+- [x] 스캐너가 finding을 탐지해도 결과 파일이 먼저 생성되도록 종료 코드 처리
 
 ### 파이프라인 연동 검증
 
@@ -146,6 +150,9 @@ Semgrep, Gitleaks, Trivy를 이용한 보안 검사를 구성하고, 각 도구�
 | SAST | Semgrep | `security/reports/sast-report.json` | `sast-report` |
 | Secret Scan | Gitleaks | `security/reports/secret-report.json` | `secret-report` |
 | Dependency Scan | Trivy | `security/reports/dependency-report.json` | `dependency-report` |
+| SBOM | Trivy (CycloneDX 1.6) | `security/reports/sbom.cdx.json` | `sbom` |
+| DT upload | Dependency-Track | `security/reports/dependency-track-upload-report.json` | `dependency-track-upload-report` |
+| Scan history | snapshot | `security/reports/history/<run_id>/` | `dependency-scan-history-<run_id>` |
 
 ---
 
@@ -160,17 +167,17 @@ Semgrep, Gitleaks, Trivy를 이용한 보안 검사를 구성하고, 각 도구�
 
 ## A파트 전달 항목
 
-- [ ] Semgrep 실행 명령어
+- [x] Semgrep 실행 명령어
 - [x] Semgrep 설정 방식 (`--config auto`, 별도 설정 파일 없음)
-- [ ] Gitleaks 실행 명령어
+- [x] Gitleaks 실행 명령어
 - [ ] Gitleaks 설정 파일 경로
-- [ ] Trivy 실행 명령어
-- [ ] 각 도구의 결과 파일 경로
-- [ ] 각 도구의 실행 오류 확인 기준
+- [x] Trivy 실행 명령어 (fs/image + CycloneDX SBOM)
+- [x] 각 도구의 결과 파일 경로
+- [x] 각 도구의 실행 오류 확인 기준
 - [ ] 도구별 원본 JSON 결과 샘플
 - [ ] 원본 Severity 및 오류 필드 위치
 - [ ] 로컬 테스트 결과
-- [ ] Workflow Job 등록 정보
+- [x] Workflow Job 등록 정보
 
 ---
 

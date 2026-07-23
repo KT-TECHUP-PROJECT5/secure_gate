@@ -1,8 +1,8 @@
 ---
 문서명: 프로젝트 협업용 가이드
-최신화: 2026-07-20
+최신화: 2026-07-23
 작성자: 이윤재
-Version: 1.2.0
+Version: 1.3.0
 ---
 
 # Team Interface — A 파트 연동 가이드
@@ -114,12 +114,16 @@ steps:
 | SAST 결과 파일 경로            | `security/reports/sast-report.json`                                             | A파트 고정 |
 | Gitleaks 실행 명령어           | `gitleaks git . --report-format json --report-path security/reports/secret-report.json --redact=100 --exit-code 0 --no-banner` | 확정       |
 | Secret Scan 결과 파일 경로     | `security/reports/secret-report.json`     | A파트 고정 |
-| Trivy 실행 명령어              | `trivy fs --scanners vuln --file-patterns "pip:requirements-legacy.txt" --format json --output security/reports/dependency-report.json --exit-code 0 --no-progress .` | 확정       |
+| Trivy 실행 명령어 (fs)     | `trivy fs --scanners vuln --file-patterns "pip:requirements-legacy.txt" --format json --output security/reports/dependency-report.json --exit-code 0 --no-progress .` | 확정 |
+| Trivy 실행 명령어 (image)  | Dockerfile 존재 시 `docker build` 후 `trivy image ...` (CVE JSON + CycloneDX 분리 실행). 모노레포는 `dockerfile_path` / `docker_build_context` 명시 | 확정 |
+| Trivy SBOM 명령어          | `trivy {fs\|image} --format cyclonedx ...` (`fs`는 CVE와 동일하게 `--file-patterns "pip:requirements-legacy.txt"` 포함) | 확정 |
 | Dependency Scan 결과 파일 경로 | `security/reports/dependency-report.json` | A파트 고정 |
-| SBOM 형식                      | CycloneDX (Trivy 생성, CVE 보고서와 역할 분리) | 확정    |
-| 각 도구의 실패 기준            | 결과 파일 미생성 또는 유효하지 않은 JSON | 초기 확정  |
-| 출력 형식                      | 도구별 원본 JSON                         | 확정       |
-| 선정 근거 문서                 | `docs/sast/sast-tool-selection-summary.md` | 확정     |
+| SBOM 형식 / 경로           | CycloneDX **1.6** → `security/reports/sbom.cdx.json` (`bomFormat == "CycloneDX"`, `specVersion == "1.6"` 검증, 실패 시 Job 실패) | 확정 |
+| Dependency-Track           | 기존 프로젝트 UUID에 BOM 업로드 (선택). URL+API Key+UUID 모두 있을 때만. `autoCreate` 없음. DT는 Gate가 아니라 SBOM/SCA 대시보드. `succeeded`=BOM 수신 성공(분석 완료 아님) | 확정 |
+| DT 업로드 리포트           | `security/reports/dependency-track-upload-report.json` (artifact `dependency-track-upload-report`) | 확정 |
+| 각 도구의 실패 기준        | 결과 파일 미생성 또는 유효하지 않은 JSON. DT API 실패는 Job 비차단 | 초기 확정 |
+| 출력 형식                  | 도구별 원본 JSON                         | 확정       |
+| 선정 근거 문서             | `docs/sast/sast-tool-selection-summary.md` | 확정     |
 
 ---
 
@@ -161,7 +165,10 @@ steps:
 | ---------------------- | ----------------------------------------- |
 | C - SAST               | `security/reports/sast-report.json`       |
 | C - Secret Scan        | `security/reports/secret-report.json`     |
-| C - Dependency Scan    | `security/reports/dependency-report.json` |
+| C - Dependency Scan    | `security/reports/dependency-report.json` (latest 계약) |
+| C - SBOM               | `security/reports/sbom.cdx.json`          |
+| C - DT upload report   | `security/reports/dependency-track-upload-report.json` |
+| C - Scan history       | `security/reports/history/<run_id>/` (스냅샷 + `meta.json`) |
 | D - Runtime Validation | `security/reports/runtime-report.json`    |
 | A - Summary            | `security/reports/security-summary.json`  |
 | A - Gate Decision      | `security/reports/gate-decision.json`     |

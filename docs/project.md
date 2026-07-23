@@ -247,10 +247,13 @@ CodeQL로 교체하지 않고 Semgrep을 고도화한다. CodeQL이 탐지한 Op
 
 | 산출물 | 역할 |
 | --- | --- |
-| Trivy CVE 보고서 | 무엇이 취약한가 (CVE, Severity, FixedVersion) |
+| Trivy CVE 보고서 | 무엇이 취약한가 (CVE, Severity, FixedVersion) — Gate 판정 입력 |
 | CycloneDX SBOM | 무엇이 들어있는가 (Component, Version, PURL, 의존 관계) |
+| Dependency-Track | SBOM/SCA 추적 대시보드. 기존 프로젝트 UUID에 BOM 업로드 (Gate 판정기 아님) |
 
-같은 Trivy로 생성할 수 있지만 용도가 다르다. SBOM의 빈 `vulnerabilities[]`를 “취약점 없음”으로 해석하지 않는다.
+같은 Trivy로 생성할 수 있지만 용도가 다르다. SBOM의 빈 `vulnerabilities[]`를 “취약점 없음”으로 해석하지 않는다.  
+Secure Gate는 CycloneDX **specVersion 1.6**으로 고정한다 (Dependency-Track 5.0.x 호환).  
+Dependency-Track `status=succeeded`는 BOM **수신 성공**이며 내부 취약점 분석 완료를 보장하지 않는다. `DEPENDENCY_TRACK_URL`은 Backend API base URL이다.
 
 ### 10.4 PR DAST와 Staging CD DAST
 

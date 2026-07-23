@@ -40,7 +40,14 @@ jobs:
       # target_url: https://staging.example.com
       # --- 정책 오버라이드 (없으면 Secure Gate 기본 정책 사용) ---
       # policy_path: security/policies/security-gate-policy.json
+      # --- Trivy image 분기 (모노레포는 경로를 명시) ---
+      # dockerfile_path: apps/api/Dockerfile
+      # docker_build_context: apps/api
+      # --- Dependency-Track (기존 프로젝트 UUID에 CycloneDX BOM 업로드, autoCreate 없음) ---
+      # dependency_track_project_uuid: "00000000-0000-0000-0000-000000000000"
     secrets: inherit
-    # Dynatrace 확장 시:
+    # Dynatrace / Dependency-Track 확장 시:
     # secrets:
     #   DYNATRACE_TOKEN: ${{ secrets.DYNATRACE_TOKEN }}
+    #   DEPENDENCY_TRACK_URL: ${{ secrets.DEPENDENCY_TRACK_URL }}       # Backend API base URL (UI 아님)
+    #   DEPENDENCY_TRACK_API_KEY: ${{ secrets.DEPENDENCY_TRACK_API_KEY }}
