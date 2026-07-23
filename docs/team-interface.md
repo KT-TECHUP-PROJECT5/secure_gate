@@ -1,8 +1,8 @@
 ---
 문서명: 프로젝트 협업용 가이드
-최신화: 2026-07-20
+최신화: 2026-07-23
 작성자: 이윤재
-Version: 1.2.0
+Version: 1.3.0
 ---
 
 # Team Interface — A 파트 연동 가이드
@@ -127,14 +127,18 @@ steps:
 
 | 항목                              | 내용                                   | 상태       |
 | --------------------------------- | -------------------------------------- | ---------- |
-| PR 단계 DAST 환경                 | runner-local 또는 `target_url` (`enable_dast`) | 확정 방향 |
-| Staging CD 실행 방식              | `push main` → `cd-staging.yml` (Build/Deploy/Post-deploy) | 목표 확정 / 구현 Placeholder |
-| Staging URL                       |                                        | 미확정     |
-| Health Check Endpoint             |                                        | 미확정     |
-| Smoke Test 실행 명령어            |                                        | 미확정     |
-| DAST 도구                         | OWASP ZAP + Nuclei                     | 확정       |
-| ZAP 실행 명령어                   |                                        | 미확정     |
-| Nuclei 실행 명령어                | Docker 기반 JSONL 출력 (D파트 Workflow 연동) | 진행 중 |
+| PR 단계 실행 방식                 | GitHub Actions Runner 내부에서 B파트 앱을 임시 실행. PostgreSQL은 `web/docker-compose.yml`, FastAPI는 `uvicorn` 사용 | D파트 전달 완료 / A파트 연결 필요 |
+| PR 단계 Runtime URL               | 고정 URL이 없으면 `RUNTIME_BASE_URL=http://127.0.0.1:8000` 사용 | D파트 전달 완료 |
+| 외부 Staging URL                  | `STAGING_URL=http://www.securegate.n-e.kr` | 확정 / A파트 Variable 연결 필요 |
+| Health Check Endpoint             | `HEALTH_CHECK_PATH=/posts`, 기대 상태 코드 `200` | D파트 기준 확정 |
+| Smoke Test 실행 경로              | `SMOKE_TEST_PATHS="/login=200,/posts=200,/upload=200\|303,/docs=200,/redoc=200"` | D파트 기준 확정 |
+| ZAP 실행 명령어                   | `zap-baseline.py` 실행 후 `security/reports/zap-report.json` 저장 | D파트 전달 완료 / A파트 연결 필요 |
+| Nuclei 실행 명령어                | `medium,high,critical`, `xss`, `timeout 5m`, `rate-limit=10`, `c=5`, `retries=0`, `timeout=5`, `-ni` 기준으로 실행 후 `security/reports/nuclei-report.jsonl` 저장 | D파트 전달 완료 / A파트 연결 필요 |
+| Trivy CVE 기반 Nuclei 우선 검사   | C파트 Trivy 원본 JSON의 High/Critical CVE를 `scripts/trivy-to-nuclei.py`로 추출한 뒤 Nuclei `-id` 입력으로 사용 | D파트 구현 완료 / 원본 경로 확정 필요 |
+| Custom Runtime Check              | `debug-exposure`, `docs-exposure`, `reflected-xss`, `search-sqli`, `admin-access`, `idor` | D파트 구현 완료 |
+| Dynatrace Environment             | `https://xlj20734.live.dynatrace.com`, Staging OneAgent와 `environment:staging` 태그 사용 | D파트 기준 확정 / 태그 확인 필요 |
+| Dynatrace 수집                     | `scripts/fetch-dynatrace-problems.py`로 열린 문제를 `security/reports/dynatrace-problems.json`에 저장 | D파트 구현 완료 / A파트 연결 필요 |
+| Dynatrace Secret 매핑              | Workflow의 `DYNATRACE_TOKEN`을 스크립트 환경변수 `DYNATRACE_API_TOKEN`으로 전달. 토큰 범위는 `problems.read`만 사용 | A파트 연결 필요 |
 | Runtime Validation 결과 파일 경로 | `security/reports/runtime-report.json` | A파트 고정 |
 | 보안 헤더 검증 기준               | CSP, X-Frame-Options, X-Content-Type-Options 등 | 초기 확정 |
 | Runtime Validation 실패 기준      | 통합 finding의 Critical/High → Policy Evaluator | 확정 방향 |
@@ -162,6 +166,9 @@ steps:
 | C - SAST               | `security/reports/sast-report.json`       |
 | C - Secret Scan        | `security/reports/secret-report.json`     |
 | C - Dependency Scan    | `security/reports/dependency-report.json` |
+| D - ZAP 원본           | `security/reports/zap-report.json`        |
+| D - Nuclei 원본        | `security/reports/nuclei-report.jsonl`    |
+| D - Dynatrace 원본     | `security/reports/dynatrace-problems.json` |
 | D - Runtime Validation | `security/reports/runtime-report.json`    |
 | A - Summary            | `security/reports/security-summary.json`  |
 | A - Gate Decision      | `security/reports/gate-decision.json`     |

@@ -1,8 +1,8 @@
 ---
 문서명: 파이프라인 운영 가이드
-최신화: 2026-07-20
+최신화: 2026-07-23
 작성자: 이윤재
-Version: 1.2.0
+Version: 1.3.0
 ---
 
 # Pipeline Guide
@@ -147,7 +147,18 @@ jobs:
 | Secret | 필수 | 설명 |
 | --- | --- | --- |
 | `GITHUB_TOKEN` | 자동 | PR 댓글용 (`secrets: inherit` 권장) |
-| `DYNATRACE_TOKEN` | 선택 | Dynatrace 확장용 (미구현 placeholder) |
+| `DYNATRACE_TOKEN` | 선택 | Dynatrace Problems API 조회용. `problems.read` 범위의 읽기 전용 토큰을 등록하고 실행 step에서 `DYNATRACE_API_TOKEN`으로 매핑한다. |
+
+Dynatrace 연동에 필요한 D파트 전달값은 다음과 같다. 현재 Workflow에는 토큰 선언만 있고 실제 수집 step은 아직 연결되지 않았으므로 A파트가 D파트 가이드의 순서대로 연결해야 한다.
+
+| 구분 | 값 |
+| --- | --- |
+| Environment URL | `https://xlj20734.live.dynatrace.com` |
+| Staging URL | `http://www.securegate.n-e.kr` |
+| Problem Selector | `status("open"),entityTags("environment:staging")` |
+| 수집 스크립트 | `scripts/fetch-dynatrace-problems.py` |
+| 원본 결과 | `security/reports/dynatrace-problems.json` |
+| 통합 결과 | `security/reports/runtime-report.json` |
 
 ---
 
@@ -202,14 +213,18 @@ uses: KT-TECHUP-PROJECT5/secure_gate/.github/workflows/pr-security-gate.yml@v1
 
 ```text
 security/reports/
-  build-report.json
-  sast-report.json
-  secret-report.json
-  dependency-report.json
-  runtime-report.json
-  zap-report.json           # enable_dast 시 (선택)
-  security-summary.json
-  gate-decision.json
+  build-report.json         # Build/Test 결과
+  sast-report.json          # SAST 결과 (C파트)
+  secret-report.json        # Secret Scan 결과 (C파트)
+  dependency-report.json    # Dependency Scan 결과 (C파트)
+  trivy.json                # Trivy 원본 JSON (C파트 -> D파트 CVE 우선 검사 입력)
+  zap-report.json           # OWASP ZAP 원본 JSON (D파트 중간 입력)
+  nuclei-cve-ids.txt        # Trivy High/Critical CVE에서 만든 Nuclei template ID 입력
+  nuclei-report.jsonl       # Nuclei 원본 JSONL (D파트 중간 입력)
+  dynatrace-problems.json   # Dynatrace Problems API 원본 JSON (D파트 중간 입력)
+  runtime-report.json       # Runtime Validation 결과 (D파트)
+  security-summary.json     # Aggregator 통합 결과
+  gate-decision.json        # Gate Evaluator 판단 결과
 ```
 
 ---
@@ -267,3 +282,6 @@ security/reports/
 | `scripts/aggregate-results.py` | 각 보안 결과 파일 통합 |
 | `scripts/evaluate-gate.py` | 정책 기준 Pass/Fail 판단 |
 | `scripts/create-pr-comment.py` | GitHub API로 PR 댓글 작성 |
+| `scripts/runtime-validation.py` | Health / Smoke / Header / Custom Check / ZAP / Nuclei / Dynatrace 결과를 `runtime-report.json`으로 생성 |
+| `scripts/fetch-dynatrace-problems.py` | Dynatrace Problems API v2의 열린 문제를 JSON으로 수집 |
+| `scripts/trivy-to-nuclei.py` | Trivy 원본 JSON의 High/Critical CVE를 Nuclei template ID 입력 파일로 변환 |
