@@ -75,7 +75,7 @@ flowchart TD
 | Dependency Scan | Trivy 기반 의존성 및 CVE 검사 |
 | SBOM | CycloneDX 구성품·버전·의존 관계 목록 (Trivy 생성) |
 | DAST | OWASP ZAP + Nuclei 기반 실행 중인 웹 애플리케이션 동적 분석 |
-| Runtime Validation | Health Check, Smoke Test, 보안 헤더 검증, DAST 결과 정규화 |
+| Runtime Validation | Health Check, Smoke Test, 보안 헤더, Custom Runtime Check, ZAP/Nuclei 및 Dynatrace 문제 결과 정규화, Trivy CVE 우선 검사 |
 | Aggregator | 각 보안 도구의 결과 파일을 하나의 Summary로 통합 |
 | Policy Evaluator | 위험도 및 정책 기준으로 Merge/배포 가능 여부 판단 |
 | Merge 차단 | Critical/High 취약점 또는 Secret 탐지 시 PR 자동 차단 |
@@ -140,6 +140,7 @@ Gate Status: ❌ FAILED
 | Dependency Scan | Trivy |
 | SBOM | CycloneDX |
 | DAST | OWASP ZAP, Nuclei |
+| Observability | Dynatrace OneAgent, Problems API v2 |
 | Runtime Validation | Health Check, Smoke Test, Security Header Check, 결과 정규화 |
 | Aggregator / Policy Evaluator | Python |
 | PR Comment | GitHub API |
@@ -194,7 +195,11 @@ uses: KT-TECHUP-PROJECT5/secure_gate/.github/workflows/pr-security-gate.yml@v1
 ├── scripts/
 │   ├── aggregate-results.py           # 보안 검사 결과 통합
 │   ├── evaluate-gate.py               # 정책 기반 Gate 판단
-│   └── create-pr-comment.py           # PR 댓글 자동 작성
+│   ├── create-pr-comment.py           # PR 댓글 자동 작성
+│   ├── runtime-validation.py          # D파트 Runtime Validation 제출본
+│   ├── fetch-dynatrace-problems.py    # Dynatrace Problems API 결과 수집
+│   ├── trivy-to-nuclei.py             # Trivy High/Critical CVE를 Nuclei 입력으로 변환
+│   └── run-nuclei-validation.py       # Nuclei 기본/CVE 검사 및 결과 통합
 │
 ├── security/
 │   ├── policies/

@@ -1,8 +1,8 @@
 ---
 문서명: Secure PR Gate 프로젝트 기획서
-최신화: 2026-07-20
+최신화: 2026-07-23
 작성자: 이윤재
-Version: 1.3.0
+Version: 1.4.0
 ---
 
 # Secure PR Gate 프로젝트 기획서
@@ -120,6 +120,7 @@ flowchart TD
 | Health Check           | 배포된 서비스의 기본 정상 동작 확인                             |
 | Smoke Test             | 로그인, 주요 API, 핵심 페이지 등 기본 기능 검증                 |
 | 보안 헤더 검증         | CSP, HSTS, X-Frame-Options 등 기본 보안 설정 확인               |
+| Runtime Observability  | Dynatrace OneAgent와 Problems API로 Staging 장애·성능 문제 수집 |
 | Aggregator             | 각 도구의 결과 파일을 통합                                      |
 | Policy Evaluator       | 위험도 및 정책 기준으로 Merge/배포 가능 여부 판단               |
 | Merge 차단             | Critical/High 취약점 또는 Secret 탐지 시 PR 차단                |
@@ -140,6 +141,7 @@ flowchart TD
 | Dependency Scan    | Trivy (CVE)                                                       |
 | SBOM               | CycloneDX (Trivy 생성)                                            |
 | DAST               | OWASP ZAP, Nuclei                                                 |
+| Observability      | Dynatrace OneAgent, Problems API v2                               |
 | Runtime Validation | Health Check, Smoke Test, Security Header Check, 결과 정규화      |
 | Report Format      | JSON, SARIF, Markdown, HTML                                       |
 | Aggregator         | Python Script                                                     |
@@ -156,7 +158,7 @@ flowchart TD
 | A. Platform / Pipeline             | GitHub Actions, PR 트리거, Aggregator 뼈대, Merge 차단, PR 댓글 자동화, CD Workflow, Docker Build/CD 연동 |
 | B. Application Security / Red Team | 앱 코드와 취약점 통합, 공격 PoC 작성 및 검증, 오탐/미탐 교차검증                                          |
 | C. Security Scan                   | Semgrep/Gitleaks/Trivy 셋업·튜닝, SBOM(CycloneDX) 생성, 원본 JSON 연동                                    |
-| D. Runtime Validation              | ZAP·Nuclei DAST, 보안 헤더 검증, Health Check, Smoke Test, Staging 배포 후 검증                           |
+| D. Runtime Validation              | ZAP·Nuclei DAST, 보안 헤더, Health/Smoke, Dynatrace 문제 수집·정규화, Staging 배포 후 검증                 |
 | E. AppSec / Policy / IR            | OWASP/CVSS 기준, 정책 룰, IR 플레이북, PR 댓글 수정 가이드 템플릿                                         |
 
 ---
@@ -206,6 +208,10 @@ scripts/
   aggregate-results.py
   evaluate-gate.py
   create-pr-comment.py
+  runtime-validation.py
+  fetch-dynatrace-problems.py
+  trivy-to-nuclei.py
+  run-nuclei-validation.py
 
 docs/
   pipeline-guide.md
@@ -240,17 +246,20 @@ Secure PR Gate의 “배포”는 다음을 의미한다.
 | Gate 연동 | Semgrep JSON 계약이 이미 적용됨. CodeQL은 SARIF 파서 추가 필요 |
 | 규칙 유지보수 | Semgrep YAML 커스텀이 팀에 유리 |
 
-CodeQL로 교체하지 않고 Semgrep을 고도화한다. CodeQL이 탐지한 Open Redirect는 Semgrep 커스텀 규칙으로 보완한다.  
+CodeQL로 교체하지 않고 Semgrep을 고도화한다. CodeQL이 탐지한 Open Redirect는 Semgrep 커스텀 규칙으로 보완한다.
 상세 근거: `docs/sast/sast-tool-selection-summary.md`
 
 ### 10.3 의존성 검사와 SBOM
 
 | 산출물 | 역할 |
 | --- | --- |
-| Trivy CVE 보고서 | 무엇이 취약한가 (CVE, Severity, FixedVersion) |
+| Trivy CVE 보고서 | 무엇이 취약한가 (CVE, Severity, FixedVersion) — Gate 판정 입력 |
 | CycloneDX SBOM | 무엇이 들어있는가 (Component, Version, PURL, 의존 관계) |
+| Dependency-Track | SBOM/SCA 추적 대시보드. 기존 프로젝트 UUID에 BOM 업로드 (Gate 판정기 아님) |
 
 같은 Trivy로 생성할 수 있지만 용도가 다르다. SBOM의 빈 `vulnerabilities[]`를 “취약점 없음”으로 해석하지 않는다.
+Secure Gate는 CycloneDX **specVersion 1.6**으로 고정한다 (Dependency-Track 5.0.x 호환).
+Dependency-Track `status=succeeded`는 BOM **수신 성공**이며 내부 취약점 분석 완료를 보장하지 않는다. `DEPENDENCY_TRACK_URL`은 Backend API base URL이다.
 
 ### 10.4 PR DAST와 Staging CD DAST
 
@@ -301,12 +310,13 @@ DAST는 두 단계에서 목적과 환경이 다르다. 둘 다 활성화하면 
 
 ```text
 security/reports/
-  sast-report.json 또는 sast-report.sarif
-  gitleaks-report.json
-  trivy-report.json 또는 trivy-report.sarif
+  sast-report.json
+  secret-report.json
+  dependency-report.json
   zap-report.json
-  smoke-test-report.json
-  header-check-report.json
+  nuclei-report.jsonl
+  dynatrace-problems.json
+  runtime-report.json
   security-summary.json
   gate-decision.json
 ```
@@ -356,6 +366,11 @@ A 파트에 전달해야 할 항목:
 - Smoke Test 실행 명령어
 - ZAP 실행 명령어
 - ZAP 결과 파일 경로
+- Nuclei 실행 명령어
+- Nuclei 결과 파일 경로
+- Trivy High/Critical CVE 기반 Nuclei 우선 검사 명령어
+- Dynatrace Problems API 수집 명령어와 결과 파일 경로
+- Dynatrace Environment URL, Problem Selector, 필요한 Secret/Variable
 - 보안 헤더 검증 기준
 - Runtime Validation 실패 기준
 
@@ -460,8 +475,8 @@ Production 배포 허용 또는 차단
 | SAST 결과                 | Semgrep 기반 코드 취약점 분석 결과            |
 | Secret Scan 결과          | Gitleaks 기반 민감정보 탐지 결과              |
 | Dependency Scan 결과      | Trivy 기반 CVE 탐지 결과                      |
-| DAST 결과                 | ZAP 기반 동적 분석 결과                       |
-| Runtime Validation 결과   | Health Check, Smoke Test, 보안 헤더 검증 결과 |
+| DAST 결과                 | ZAP·Nuclei 기반 동적 분석 결과                |
+| Runtime Validation 결과   | Health/Smoke/Header/DAST/Dynatrace 통합 결과  |
 | IR 플레이북               | 주요 취약점 대응 절차                         |
 | 최종 발표 자료            | 데모 흐름 및 결과 정리                        |
 

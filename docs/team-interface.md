@@ -1,8 +1,8 @@
 ---
 문서명: 프로젝트 협업용 가이드
-최신화: 2026-07-20
+최신화: 2026-07-23
 작성자: 이윤재
-Version: 1.2.0
+Version: 1.6.0
 ---
 
 # Team Interface — A 파트 연동 가이드
@@ -114,12 +114,16 @@ steps:
 | SAST 결과 파일 경로            | `security/reports/sast-report.json`                                             | A파트 고정 |
 | Gitleaks 실행 명령어           | `gitleaks git . --report-format json --report-path security/reports/secret-report.json --redact=100 --exit-code 0 --no-banner` | 확정       |
 | Secret Scan 결과 파일 경로     | `security/reports/secret-report.json`     | A파트 고정 |
-| Trivy 실행 명령어              | `trivy fs --scanners vuln --file-patterns "pip:requirements-legacy.txt" --format json --output security/reports/dependency-report.json --exit-code 0 --no-progress .` | 확정       |
+| Trivy 실행 명령어 (fs)     | `trivy fs --scanners vuln --file-patterns "pip:requirements-legacy.txt" --format json --output security/reports/dependency-report.json --exit-code 0 --no-progress .` | 확정 |
+| Trivy 실행 명령어 (image)  | Dockerfile 존재 시 `docker build` 후 `trivy image ...` (CVE JSON + CycloneDX 분리 실행). 모노레포는 `dockerfile_path` / `docker_build_context` 명시 | 확정 |
+| Trivy SBOM 명령어          | `trivy {fs\|image} --format cyclonedx ...` (`fs`는 CVE와 동일하게 `--file-patterns "pip:requirements-legacy.txt"` 포함) | 확정 |
 | Dependency Scan 결과 파일 경로 | `security/reports/dependency-report.json` | A파트 고정 |
-| SBOM 형식                      | CycloneDX (Trivy 생성, CVE 보고서와 역할 분리) | 확정    |
-| 각 도구의 실패 기준            | 결과 파일 미생성 또는 유효하지 않은 JSON | 초기 확정  |
-| 출력 형식                      | 도구별 원본 JSON                         | 확정       |
-| 선정 근거 문서                 | `docs/sast/sast-tool-selection-summary.md` | 확정     |
+| SBOM 형식 / 경로           | CycloneDX **1.6** → `security/reports/sbom.cdx.json` (`bomFormat == "CycloneDX"`, `specVersion == "1.6"` 검증, 실패 시 Job 실패) | 확정 |
+| Dependency-Track           | 기존 프로젝트 UUID에 BOM 업로드 (선택). URL+API Key+UUID 모두 있을 때만. `autoCreate` 없음. DT는 Gate가 아니라 SBOM/SCA 대시보드. `succeeded`=BOM 수신 성공(분석 완료 아님) | 확정 |
+| DT 업로드 리포트           | `security/reports/dependency-track-upload-report.json` (artifact `dependency-track-upload-report`) | 확정 |
+| 각 도구의 실패 기준        | 결과 파일 미생성 또는 유효하지 않은 JSON. DT API 실패는 Job 비차단 | 초기 확정 |
+| 출력 형식                  | 도구별 원본 JSON                         | 확정       |
+| 선정 근거 문서             | `docs/sast/sast-tool-selection-summary.md` | 확정     |
 
 ---
 
@@ -127,18 +131,31 @@ steps:
 
 | 항목                              | 내용                                   | 상태       |
 | --------------------------------- | -------------------------------------- | ---------- |
-| PR 단계 DAST 환경                 | runner-local 또는 `target_url` (`enable_dast`) | 확정 방향 |
-| Staging CD 실행 방식              | `push main` → `cd-staging.yml` (Build/Deploy/Post-deploy) | 목표 확정 / 구현 Placeholder |
-| Staging URL                       |                                        | 미확정     |
-| Health Check Endpoint             |                                        | 미확정     |
-| Smoke Test 실행 명령어            |                                        | 미확정     |
-| DAST 도구                         | OWASP ZAP + Nuclei                     | 확정       |
-| ZAP 실행 명령어                   |                                        | 미확정     |
-| Nuclei 실행 명령어                | Docker 기반 JSONL 출력 (D파트 Workflow 연동) | 진행 중 |
+| PR 단계 실행 방식                 | GitHub Actions Runner 내부에서 B파트 앱을 임시 실행. PostgreSQL은 `web/docker-compose.yml`, FastAPI는 `uvicorn` 사용 | D파트 전달 완료 / A파트 연결 필요 |
+| PR 단계 Runtime URL               | 고정 URL이 없으면 `RUNTIME_BASE_URL=http://127.0.0.1:8000` 사용 | D파트 전달 완료 |
+| 외부 Staging URL                  | `STAGING_URL=http://www.securegate.n-e.kr` | 확정 / A파트 Variable 연결 필요 |
+| Staging 실행 환경                 | ECS Cluster/Service `secure-gate-dast`, Launch Type `FARGATE`, 현재 `secure-gate-dast:2`, container `web:8000` | Revision 2 배포 완료 / ALB healthy |
+| Health Check Endpoint             | `HEALTH_CHECK_PATH=/posts`, 기대 상태 코드 `200` | D파트 기준 확정 |
+| Smoke Test 실행 경로              | `SMOKE_TEST_PATHS="/login=200,/posts=200,/upload=200\|303,/docs=200,/redoc=200"` | D파트 기준 확정 |
+| PR ZAP 실행 명령어                | `zap-baseline.py` 실행 후 `security/reports/zap-report.json` 저장 | D파트 전달 완료 / A파트 연결 필요 |
+| PR Nuclei 실행 명령어             | `python3 scripts/run-nuclei-validation.py --target-url http://127.0.0.1:8000/posts --trivy-report security/reports/dependency-report.json`. 기본값은 `medium,high,critical`, `xss`, 전체 timeout 5분 | D파트 실행기 구현 완료 / A파트 연결 필요 |
+| Merge 이후 ZAP Full Scan          | ECS 배포와 Health Check 뒤 `zap-full-scan.py`, Spider 5분, Ajax Spider, 전체 timeout 30분으로 실행 | D파트 전달 완료 / A파트 CD 연결 필요 |
+| Merge 이후 Nuclei 광범위 스캔     | 태그 제한 없이 `low,medium,high,critical`, `rate-limit=20`, `c=10`, 전체 timeout 30분으로 실행 | D파트 전달 완료 / A파트 CD 연결 필요 |
+| Trivy CVE 기반 Nuclei 우선 검사   | `scripts/run-nuclei-validation.py`가 C파트 `dependency-report` Artifact의 High/Critical CVE 추출, `nuclei -tl` 사전 확인, 조건부 CVE 검사와 기본 결과 통합을 수행 | D파트 구현·검증 완료 / A파트 Artifact 다운로드 연결 필요 |
+| Trivy-Nuclei 결과 해석 기준       | `Trivy 후보 CVE 수 → Nuclei 매칭 템플릿 수 → Nuclei 실제 finding 수`를 구분. 매칭 템플릿 0개는 `passed`가 아니라 `skipped`, Trivy finding은 Gate에 유지 | D파트 기준 확정 / A·E파트 반영 필요 |
+| Trivy-Nuclei 수동 검증            | Next.js 포트폴리오 기준 Trivy 22건, High 8건, CVE 후보 5개, 매칭 템플릿 1개, 실제 finding 0개 확인 | D파트 검증 완료 |
+| Staging Nuclei 검증               | `http://www.securegate.n-e.kr/posts` 기준 Trivy CVE 후보 8개, 매칭 템플릿 0개, 기본 XSS finding 2개. CVE 검사는 `skipped: no-matching-nuclei-template` | D파트 검증 완료 |
+| Nuclei CVE coverage 파일          | `security/reports/nuclei-cve-coverage.json`에 후보 수, 매칭 템플릿 수, 기본/CVE/통합 finding 수와 skip/failure 사유 기록 | D파트 구현 완료 / A파트 Artifact 포함 필요 |
+| Custom Runtime Check              | `debug-exposure`, `docs-exposure`, `reflected-xss`, `search-sqli`, `admin-access`, `idor` | D파트 구현 완료 |
+| Dynatrace Environment             | `https://xlj20734.live.dynatrace.com`. OneAgent Code Module을 포함한 revision 2 배포, `initoneagent` exit code `0`, `web` RUNNING | 배포 정상 / Services 데이터 유입 추가 확인 필요 |
+| Dynatrace Synthetic Monitor       | `secure-gate-staging-health`, `GET /posts`, 5분, Busan, `environment:staging` / `service:secure-gate` | 생성 완료 / Success·Availability 100%·HTTP 200 확인 |
+| Dynatrace ECS Secret              | `secure-gate/dynatrace/fargate`, Key `DT_PAAS_TOKEN`, `DT_TENANTTOKEN`, `DT_CONNECTION_POINT`. 실제 값과 전체 ARN은 문서에 기록하지 않음 | Secret 값 등록·IAM 권한·revision 2 배포 완료 |
+| Dynatrace 수집                     | `scripts/fetch-dynatrace-problems.py`로 열린 문제를 `security/reports/dynatrace-problems.json`에 저장 | D파트 구현 완료 / A파트 연결 필요 |
+| Dynatrace Secret 매핑              | Workflow의 `DYNATRACE_TOKEN`을 스크립트 환경변수 `DYNATRACE_API_TOKEN`으로 전달. 토큰 범위는 `problems.read`만 사용 | A파트 연결 필요 |
 | Runtime Validation 결과 파일 경로 | `security/reports/runtime-report.json` | A파트 고정 |
 | 보안 헤더 검증 기준               | CSP, X-Frame-Options, X-Content-Type-Options 등 | 초기 확정 |
 | Runtime Validation 실패 기준      | 통합 finding의 Critical/High → Policy Evaluator | 확정 방향 |
-| PR DAST vs CD DAST                | PR=선택적 경량 검사, Staging=배포 후 재검증 | 확정 |
+| PR DAST vs CD DAST                | PR=ZAP Baseline와 제한된 Nuclei 검사, Staging=ZAP Full Scan와 Nuclei 광범위 검사를 순차 실행 | 확정 |
 
 ---
 
@@ -161,7 +178,14 @@ steps:
 | ---------------------- | ----------------------------------------- |
 | C - SAST               | `security/reports/sast-report.json`       |
 | C - Secret Scan        | `security/reports/secret-report.json`     |
-| C - Dependency Scan    | `security/reports/dependency-report.json` |
+| C - Dependency Scan    | `security/reports/dependency-report.json` (latest 계약) |
+| C - SBOM               | `security/reports/sbom.cdx.json`          |
+| C - DT upload report   | `security/reports/dependency-track-upload-report.json` |
+| C - Scan history       | `security/reports/history/<run_id>/` (스냅샷 + `meta.json`) |
+| D - ZAP 원본           | `security/reports/zap-report.json`        |
+| D - Nuclei 원본        | `security/reports/nuclei-report.jsonl`    |
+| D - Nuclei CVE coverage | `security/reports/nuclei-cve-coverage.json` |
+| D - Dynatrace 원본     | `security/reports/dynatrace-problems.json` |
 | D - Runtime Validation | `security/reports/runtime-report.json`    |
 | A - Summary            | `security/reports/security-summary.json`  |
 | A - Gate Decision      | `security/reports/gate-decision.json`     |

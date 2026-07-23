@@ -3,7 +3,9 @@
 
 # 보안 검사 결과 파일 (CI에서 생성, 로컬 보관 불필요)
 security/reports/*.json
+security/reports/*.jsonl
 security/reports/*.sarif
+security/reports/*.txt
 
 # Python
 __pycache__/
@@ -11,6 +13,11 @@ __pycache__/
 *.pyo
 .venv/
 venv/
+
+# 취약 웹 로컬 실행 파일
+web/.env
+web/app/uploads/*
+!web/app/uploads/.gitkeep
 
 # OS
 .DS_Store
