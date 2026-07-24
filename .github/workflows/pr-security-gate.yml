@@ -620,7 +620,8 @@ jobs:
     name: PR Comment
     runs-on: ubuntu-latest
     needs: aggregate-and-gate
-    if: always()
+    # PR이 아니면 댓글 대상이 없으므로 skip (push 스모크 등)
+    if: always() && github.event_name == 'pull_request'
     steps:
       - name: Checkout caller repository
         uses: actions/checkout@v4
