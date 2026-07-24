@@ -445,5 +445,91 @@ class BannerRenderTests(unittest.TestCase):
         self.assertIn("2", banner)
 
 
+class ProfileTests(unittest.TestCase):
+    """SECURE_GATE_PROFILE 오버레이가 base 정책 위에 cveTrack 노브만 덮어써
+    strict/balanced/monitor 를 caller 이름 지정만으로 전환한다."""
+
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("evaluate_gate_prof", EG_PATH)
+        cls.eg = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.eg)
+
+    # ── 오버레이 병합 / 선택 (유닛) ──
+    def test_deep_merge_recursive_nondestructive(self):
+        """_deep_merge: 중첩 dict 재귀 병합, 미지정 키 보존, base 원본 불변."""
+        base = {"cveTrack": {"enabled": "monitor",
+                             "adjustment": {"annotateOnly": True, "demote": {"maxEpss": 0.1}}}}
+        overlay = {"cveTrack": {"enabled": "enforce",
+                                "adjustment": {"demote": {"enabled": False}}}}
+        merged = self.eg._deep_merge(base, overlay)
+        self.assertEqual(merged["cveTrack"]["enabled"], "enforce")
+        self.assertFalse(merged["cveTrack"]["adjustment"]["demote"]["enabled"])
+        self.assertEqual(merged["cveTrack"]["adjustment"]["demote"]["maxEpss"], 0.1)
+        self.assertTrue(merged["cveTrack"]["adjustment"]["annotateOnly"])
+        self.assertEqual(base["cveTrack"]["enabled"], "monitor")
+
+    def test_unknown_profile_fails_hard(self):
+        """알 수 없는 프로파일 이름 → 조용히 무시하지 않고 SystemExit."""
+        prev = os.environ.get("SECURE_GATE_PROFILE")
+        os.environ["SECURE_GATE_PROFILE"] = "bogus"
+        try:
+            with self.assertRaises(SystemExit):
+                self.eg.resolve_profile_file()
+        finally:
+            if prev is None:
+                os.environ.pop("SECURE_GATE_PROFILE", None)
+            else:
+                os.environ["SECURE_GATE_PROFILE"] = prev
+
+    def test_no_profile_returns_none(self):
+        """SECURE_GATE_PROFILE 미설정 → None(오버레이 없음)."""
+        prev = os.environ.get("SECURE_GATE_PROFILE")
+        os.environ.pop("SECURE_GATE_PROFILE", None)
+        try:
+            self.assertIsNone(self.eg.resolve_profile_file())
+        finally:
+            if prev is not None:
+                os.environ["SECURE_GATE_PROFILE"] = prev
+
+    # ── 프로파일별 게이트 동작 (통합, 동일 강등대상 입력) ──
+    _DEMOTABLE_DEP = [("CVE-H", "widget", "1.0", "HIGH", None)]
+    _DEMOTABLE_DEC = [{"cve": "CVE-H", "purl": "pkg:pypi/widget@1.0",
+                       "kev": False, "epss": 0.001, "severity": "HIGH", "verdict": "warn"}]
+
+    def test_strict_enforces_but_keeps_blocks(self):
+        """strict: base(monitor)를 enforce 로 켜되 demote 비활성 → 강등대상도 차단 유지."""
+        base = json.loads(REAL_POLICY.read_text())
+        rc, dec = run_gate(pol=base, summ=summary(),
+                           dep_raw=trivy_raw(self._DEMOTABLE_DEP),
+                           decision=cve_decision(self._DEMOTABLE_DEC),
+                           env_extra={"SECURE_GATE_PROFILE": "strict"})
+        self.assertEqual(dec["cve_track"]["mode"], "enforce")
+        self.assertEqual(dec["cve_track"]["demoted"], 0)
+        self.assertTrue(dec["blocked"]); self.assertEqual(rc, 1)
+
+    def test_balanced_enforces_corrections(self):
+        """balanced: enforce + demote 활성 → 저위험 high 강등되어 미차단."""
+        base = json.loads(REAL_POLICY.read_text())
+        rc, dec = run_gate(pol=base, summ=summary(),
+                           dep_raw=trivy_raw(self._DEMOTABLE_DEP),
+                           decision=cve_decision(self._DEMOTABLE_DEC),
+                           env_extra={"SECURE_GATE_PROFILE": "balanced"})
+        self.assertEqual(dec["cve_track"]["mode"], "enforce")
+        self.assertEqual(dec["cve_track"]["demoted"], 1)
+        self.assertFalse(dec["blocked"]); self.assertEqual(rc, 0)
+
+    def test_monitor_overrides_enforce_to_dryrun(self):
+        """monitor: base 가 enforce 여도 기록만 — applied 0, 차단 유지."""
+        base = policy()  # enforce / annotateOnly=false
+        rc, dec = run_gate(pol=base, summ=summary(),
+                           dep_raw=trivy_raw(self._DEMOTABLE_DEP),
+                           decision=cve_decision(self._DEMOTABLE_DEC),
+                           env_extra={"SECURE_GATE_PROFILE": "monitor"})
+        self.assertEqual(dec["cve_track"]["mode"], "monitor")
+        self.assertEqual(dec["cve_track"]["applied"], 0)
+        self.assertTrue(dec["blocked"]); self.assertEqual(rc, 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

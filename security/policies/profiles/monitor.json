@@ -1,0 +1,6 @@
+{
+  "profile": "monitor",
+  "cveTrack": {
+    "enabled": "monitor"
+  }
+}

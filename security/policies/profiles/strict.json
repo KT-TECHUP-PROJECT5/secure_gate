@@ -1,0 +1,10 @@
+{
+  "profile": "strict",
+  "cveTrack": {
+    "enabled": "enforce",
+    "adjustment": {
+      "annotateOnly": false,
+      "demote": { "enabled": false }
+    }
+  }
+}

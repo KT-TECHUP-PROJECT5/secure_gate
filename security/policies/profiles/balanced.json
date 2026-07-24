@@ -1,0 +1,9 @@
+{
+  "profile": "balanced",
+  "cveTrack": {
+    "enabled": "enforce",
+    "adjustment": {
+      "annotateOnly": false
+    }
+  }
+}

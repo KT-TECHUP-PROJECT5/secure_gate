@@ -87,6 +87,42 @@ def resolve_guide_file() -> Path:
     return TOOLING_POLICIES / "remediation-guide.json"
 
 
+# 프로파일: cveTrack 노브만 담은 오버레이를 base 정책에 병합한다. caller 는
+# SECURE_GATE_PROFILE 로 '이름만' 지정한다. 경로 주입(traversal)을 막기 위해
+# 이름은 화이트리스트로만 해석하고 파일 위치는 툴링 루트에 고정한다(신뢰 경계).
+VALID_PROFILES = {"strict", "balanced", "monitor"}
+
+
+def resolve_profile_file():
+    """SECURE_GATE_PROFILE 이 유효 이름이면 profiles/<name>.json 경로, 없으면 None.
+
+    미지의 이름은 조용히 무시하지 않고 fail-hard — 오타로 의도한 정책이 안
+    걸리는 사고를 막는다.
+    """
+    name = os.environ.get("SECURE_GATE_PROFILE", "").strip().lower()
+    if not name:
+        return None
+    if name not in VALID_PROFILES:
+        print(
+            f"[ERROR] 알 수 없는 SECURE_GATE_PROFILE: {name!r}. "
+            f"허용: {', '.join(sorted(VALID_PROFILES))}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return TOOLING_POLICIES / "profiles" / f"{name}.json"
+
+
+def _deep_merge(base: dict, overlay: dict) -> dict:
+    """overlay 를 base 위에 깊은 병합(dict 는 재귀, 그 외는 overlay 우선). 원본 불변."""
+    out = dict(base)
+    for k, v in overlay.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
 def load_json(path: Path) -> dict:
     if not path.exists():
         print(f"[ERROR] File not found: {path}")
@@ -498,8 +534,9 @@ def _decide_adjustment(f, ev, adj_cfg):
             return "promote", "KEV 등재 — severity 무관 차단", "block"
         return "keep", "", None
 
-    # DEMOTE: 차단 중인 finding 만 대상
-    if f.get("blocking"):
+    # DEMOTE: 차단 중인 finding 만 대상. demote.enabled=false(strict 프로파일)면
+    # 강등 자체를 끈다 — annotateOnly 와 무관하게 모든 차단을 유지한다.
+    if f.get("blocking") and demote.get("enabled", True):
         require_not_kev = demote.get("requireNotKev", True)
         max_epss = demote.get("maxEpss")
         min_sev = demote.get("minSeverity", "high")
@@ -671,6 +708,12 @@ def apply_cve_track(decision: dict, cve_result: dict, policy: dict) -> dict:
 def main():
     summary  = load_json(SUMMARY_FILE)
     policy   = load_json(resolve_policy_file())
+    profile_file = resolve_profile_file()
+    if profile_file is not None:
+        if not profile_file.is_file():
+            print(f"[ERROR] 프로파일 파일 없음: {profile_file}", file=sys.stderr)
+            sys.exit(1)
+        policy = _deep_merge(policy, load_json(profile_file))
     validate_policy(policy)
     guides   = load_json(resolve_guide_file())
 

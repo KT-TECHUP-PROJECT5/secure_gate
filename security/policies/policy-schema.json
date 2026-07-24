@@ -15,6 +15,7 @@
   ],
   "properties": {
     "version": { "type": "string" },
+    "profile": { "type": "string", "description": "병합된 프로파일 오버레이 식별자(strict/balanced/monitor). SECURE_GATE_PROFILE로 선택 시 base에 얹힌다." },
     "severityMapping": {
       "type": "object",
       "additionalProperties": {
@@ -104,6 +105,7 @@
             "demote": {
               "type": "object",
               "properties": {
+                "enabled": { "type": "boolean", "description": "false면 강등 자체를 끔(strict 프로파일). 미지정 시 기본 활성." },
                 "requireNotKev": { "type": "boolean" },
                 "maxEpss": { "type": "number" },
                 "minSeverity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
