@@ -1,0 +1,56 @@
+# 사용자 프로젝트에 복사할 최소 caller workflow 예시
+# 파일 위치: <your-repo>/.github/workflows/security-gate.yml
+#
+# 배포 버전은 Secure PR Gate 저장소의 릴리즈 태그를 사용한다.
+#   uses: KT-TECHUP-PROJECT5/secure_gate/.github/workflows/pr-security-gate.yml@v1
+#
+# @v1 은 major 버전 이동 태그(권장). 고정이 필요하면 @v1.0.0 사용.
+
+name: Secure PR Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+  security-events: write
+
+jobs:
+  secure-pr-gate:
+    uses: KT-TECHUP-PROJECT5/secure_gate/.github/workflows/pr-security-gate.yml@v1
+    with:
+      gate_repository: KT-TECHUP-PROJECT5/secure_gate
+      gate_ref: v1
+      enable_dast: false
+      # --- runner-local DAST (EC2 없이 GitHub Actions runner에서 앱 실행) ---
+      # enable_dast: true
+      # install_command: npm ci
+      # build_command: npm run build
+      # start_command: npm start
+      # app_port: "3000"
+      # health_path: /health
+      # node_version: "20"
+      # --- 또는 이미 떠 있는 Preview/Staging URL ---
+      # enable_dast: true
+      # target_url: https://staging.example.com
+      # --- 정책 오버라이드 (없으면 Secure Gate 기본 정책 사용) ---
+      # policy_path: security/policies/security-gate-policy.json
+      # --- Trivy image 분기 (모노레포는 경로를 명시) ---
+      # dockerfile_path: apps/api/Dockerfile
+      # docker_build_context: apps/api
+      # --- Dependency-Track (레포/서비스 name + main, 없으면 autoCreate) ---
+      # dependency_track_service_name: backend
+      # dependency_track_project_version: main
+      # dependency_track_upload_mode: main-only
+      # 상세: docs/dependency-track.md
+    secrets: inherit
+    # Dynatrace / Dependency-Track 확장 시:
+    # secrets:
+    #   DYNATRACE_TOKEN: ${{ secrets.DYNATRACE_TOKEN }}
+    #   DEPENDENCY_TRACK_URL: ${{ secrets.DEPENDENCY_TRACK_URL }}       # Backend API base URL (UI 아님)
+    #   DEPENDENCY_TRACK_API_KEY: ${{ secrets.DEPENDENCY_TRACK_API_KEY }}

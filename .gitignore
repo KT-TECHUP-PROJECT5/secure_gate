@@ -3,7 +3,9 @@
 
 # 보안 검사 결과 파일 (CI에서 생성, 로컬 보관 불필요)
 security/reports/*.json
+security/reports/*.jsonl
 security/reports/*.sarif
+security/reports/*.txt
 
 # SBOM 파이프라인 중간 생성물 (2·3단계 산출물)
 security/sbom/generated/
@@ -17,6 +19,11 @@ __pycache__/
 *.pyo
 .venv/
 venv/
+
+# 취약 웹 로컬 실행 파일
+web/.env
+web/app/uploads/*
+!web/app/uploads/.gitkeep
 
 # OS
 .DS_Store

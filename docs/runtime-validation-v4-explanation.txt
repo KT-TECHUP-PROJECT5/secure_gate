@@ -1,0 +1,674 @@
+Runtime Validation v4 설명
+작성일: 2026-07-15
+최신화: 2026-07-23
+대상 파일: scripts/runtime-validation.py
+
+1. 제출용 파일
+
+제출용 파일은 scripts/runtime-validation.py 이다.
+현재 저장소에는 헷갈리지 않도록 v1/v2/v3 학습용 파일을 남기지 않고, 최종 제출용 runtime-validation.py만 사용한다.
+
+runtime-validation.py는 실행 중인 웹 애플리케이션을 대상으로 다음 검사를 수행한다.
+
+- Health Check
+- Smoke Test
+- Security Header Check
+- Custom Runtime Check
+- OWASP ZAP JSON 결과 파싱
+- Nuclei JSONL 결과 파싱
+- Dynatrace Problems API JSON 결과 파싱
+
+검사 결과는 security/reports/runtime-report.json으로 자동 생성된다.
+runtime-report.json은 직접 손으로 작성하는 파일이 아니다.
+
+
+2. 최종 JSON 구조
+
+최종 결과 파일은 팀 공통 스키마를 그대로 따른다.
+top-level 필드는 status, tool, findings만 사용한다.
+
+{
+  "status": "passed | failed | warning",
+  "tool": "runtime-validation",
+  "findings": []
+}
+
+status 기준:
+
+- passed: finding이 없음
+- warning: finding은 있지만 critical/high/secret이 없음
+- failed: critical/high/secret finding이 하나 이상 있음
+
+
+3. 전체 실행 흐름
+
+parse_args()
+-> build_report()
+-> check_health()
+-> check_smoke()
+-> check_headers()
+-> check_custom_runtime()
+-> parse_zap_report()
+-> parse_nuclei_report()
+-> parse_dynatrace_problems()
+-> decide_status()
+-> runtime-report.json 저장
+
+핵심은 Runtime Validation이 ZAP/Nuclei/Dynatrace를 직접 실행하는 도구가 아니라는 점이다.
+각 도구가 만든 원본 파일이 있으면 읽어서 공통 스키마 finding으로 변환한다.
+
+
+4. import 문 설명
+
+argparse:
+명령어 옵션을 받기 위해 사용한다. 예: --base-url, --custom-checks
+
+http.cookiejar:
+로그인 후 받은 session cookie를 저장하기 위해 사용한다. admin-access, idor 같은 인증 기반 custom check에서 필요하다.
+
+html:
+ZAP 설명에 들어 있는 HTML 특수문자를 일반 문자로 바꾸기 위해 사용한다.
+
+json:
+zap-report.json, nuclei-report.jsonl, dynatrace-problems.json을 읽고 runtime-report.json을 쓰기 위해 사용한다.
+
+os:
+RUNTIME_BASE_URL, HEALTH_CHECK_PATH 같은 환경변수를 읽기 위해 사용한다.
+
+re:
+정규식 모듈이다. ZAP 설명에서 HTML 태그를 제거하고 finding id에 안전한 문자열을 만들 때 사용한다.
+
+urllib.error / urllib.parse / urllib.request:
+파이썬 기본 HTTP 요청 모듈이다.
+GET, HEAD, POST 요청을 보내고 form 데이터를 인코딩할 때 사용한다.
+
+Path:
+파일 경로를 다루기 위해 사용한다.
+
+urlparse:
+URL이 http/https 형식인지 확인하고, HTTPS 여부를 확인하기 위해 사용한다.
+
+
+5. 주요 상수
+
+OUTPUT_PATH:
+최종 결과 파일 경로다.
+기본값은 security/reports/runtime-report.json 이다.
+
+DEFAULT_ZAP_REPORT_PATH:
+ZAP 원본 JSON 기본 경로다.
+security/reports/zap-report.json을 읽는다.
+
+DEFAULT_NUCLEI_REPORT_PATH:
+Nuclei 원본 JSONL 기본 경로다.
+security/reports/nuclei-report.jsonl을 읽는다.
+
+DEFAULT_DYNATRACE_PROBLEMS_PATH:
+Dynatrace Problems API 원본 JSON 기본 경로다.
+security/reports/dynatrace-problems.json을 읽는다.
+
+DEFAULT_REQUIRED_HEADERS:
+기본으로 검사할 보안 헤더 목록이다.
+
+- x-content-type-options
+- x-frame-options
+- content-security-policy
+
+DEFAULT_CUSTOM_CHECKS:
+기본으로 실행할 프로젝트 전용 runtime check 목록이다.
+
+- debug-exposure
+- docs-exposure
+- reflected-xss
+- search-sqli
+- admin-access
+- idor
+
+DISABLED_VALUES:
+none, off, false, disable, disabled 같은 값을 넣었을 때 특정 검사를 끄기 위한 값 목록이다.
+
+
+6. make_finding()
+
+finding 하나를 공통 스키마 형태로 만들어주는 함수다.
+
+입력:
+
+- finding_id
+- severity
+- title
+- description
+- location
+
+출력:
+
+{
+  "id": finding_id,
+  "severity": severity,
+  "title": title,
+  "description": description,
+  "location": location
+}
+
+Health, Smoke, Header, Custom, ZAP, Nuclei에서 문제가 발견되면 모두 make_finding()으로 finding을 만든다.
+
+
+7. 환경변수 읽기
+
+env_or_default(name, default):
+환경변수가 있으면 그 값을 쓰고, 없으면 기본값을 쓴다.
+
+env_base_url():
+검사 대상 URL을 정한다.
+
+우선순위:
+
+1. RUNTIME_BASE_URL
+2. STAGING_URL
+3. 빈 문자열
+
+PR 검증에서는 RUNTIME_BASE_URL=http://127.0.0.1:8000을 쓰고, 외부 Staging 검증에서는 STAGING_URL을 쓸 수 있다.
+
+
+8. 문자열 파싱 함수
+
+split_csv():
+쉼표로 구분된 문자열을 리스트로 바꾼다.
+
+예:
+
+"/login=200, /posts=200"
+
+결과:
+
+["/login=200", "/posts=200"]
+
+문법:
+
+[item.strip() for item in value.split(",") if item.strip()]
+
+이 문법은 리스트 컴프리헨션이다.
+문자열을 쉼표로 나누고, 각 값의 앞뒤 공백을 제거하고, 빈 값은 제외한다.
+
+parse_status_set():
+HTTP 기대 상태 코드를 set으로 바꾼다.
+
+예:
+
+"200" -> {200}
+"200|204" -> {200, 204}
+"200,204" -> {200, 204}
+
+set을 쓰는 이유는 status_code가 기대 목록 안에 있는지 빠르게 확인하기 위해서다.
+
+parse_smoke_tests():
+SMOKE_TEST_PATHS 환경변수를 해석한다.
+
+입력:
+
+"/login=200,/posts=200,/upload=200|303"
+
+출력:
+
+[
+  ("/login", {200}),
+  ("/posts", {200}),
+  ("/upload", {200, 303})
+]
+
+
+9. URL과 Header 처리
+
+join_url(base_url, path):
+base_url과 path를 합쳐 실제 요청 URL을 만든다.
+
+예:
+
+base_url = "http://127.0.0.1:8000"
+path = "/login"
+
+결과:
+
+http://127.0.0.1:8000/login
+
+parse_required_headers():
+검사할 보안 헤더 목록을 만든다.
+
+기본 헤더:
+
+- x-content-type-options
+- x-frame-options
+- content-security-policy
+
+검사 대상 URL이 HTTPS이면 strict-transport-security도 자동으로 추가한다.
+
+normalize_headers():
+응답 헤더 이름을 모두 소문자로 바꾼다.
+HTTP 헤더는 대소문자 차이가 없어야 하므로 비교를 쉽게 하기 위한 처리다.
+
+
+10. HTTP 요청 함수
+
+request_url():
+Health, Smoke, Header처럼 응답 body가 필요 없는 검사에 사용한다.
+
+반환:
+
+- status_code
+- headers
+
+request_text():
+Custom Runtime Check처럼 응답 body까지 확인해야 하는 검사에 사용한다.
+
+입력:
+
+- url
+- method
+- timeout
+- data
+- headers
+- opener
+
+data가 있으면 urllib.parse.urlencode(data)로 form 형식으로 바꾼다.
+
+예:
+
+{"username": "user1", "password": "password123"}
+
+변환 결과:
+
+username=user1&password=password123
+
+opener가 있으면 session cookie를 유지한 상태로 요청할 수 있다.
+
+
+11. Health Check
+
+check_health():
+
+흐름:
+
+1. base_url + health_path로 health_url 생성
+2. GET 요청
+3. 실제 status가 expected_statuses 안에 있는지 확인
+4. 다르면 runtime.health.bad-status high finding 생성
+
+Health 실패는 서버가 정상 동작하지 않는 문제이므로 high로 기록한다.
+
+B파트 앱에는 /health가 없으므로 현재 기준은 GET /posts, expected 200이다.
+
+
+12. Smoke Test
+
+check_smoke():
+
+흐름:
+
+1. smoke_tests 목록을 하나씩 반복
+2. 각 path로 URL 생성
+3. GET 요청
+4. 기대 status와 실제 status 비교
+5. 다르면 runtime.smoke.bad-status high finding 추가
+
+findings.append()를 사용하므로 여러 경로가 실패하면 여러 finding이 모두 누적된다.
+
+
+13. Security Header Check
+
+check_headers():
+
+흐름:
+
+1. HEAD 요청으로 응답 헤더 확인
+2. HEAD가 405/501이면 GET으로 fallback
+3. required_headers가 응답 headers에 있는지 확인
+4. 없으면 runtime.headers.missing.<header> medium finding 추가
+
+Header 누락은 위험하지만 서버 장애는 아니므로 medium으로 기록한다.
+
+
+14. Custom Runtime Check
+
+parse_custom_checks():
+CUSTOM_RUNTIME_CHECKS 값을 해석한다.
+
+예:
+
+CUSTOM_RUNTIME_CHECKS="debug-exposure,docs-exposure,admin-access"
+
+지원하지 않는 check 이름이 들어오면 runtime.config.invalid.custom-runtime-checks finding을 만든다.
+
+CUSTOM_RUNTIME_CHECKS=none이면 custom check를 비활성화한다.
+
+check_custom_runtime():
+선택된 custom check를 순서대로 실행하고 finding을 합친다.
+
+기본 실행 목록:
+
+- debug-exposure
+- docs-exposure
+- reflected-xss
+- search-sqli
+- admin-access
+- idor
+
+
+15. debug-exposure
+
+check_debug_exposure():
+
+검사 대상:
+
+- /debug/error
+- /debug/db-error
+- /debug/path-error
+
+응답에 아래 같은 내부 정보 표시가 있으면 finding을 만든다.
+
+- Debug Information
+- Internal Hint
+- app/routers/errors.py
+- SELECT * FROM not_existing_table
+- /app/routers/errors.py
+
+생성 finding 예:
+
+runtime.custom.debug-exposure.debug-error
+
+
+16. docs-exposure
+
+check_docs_exposure():
+
+검사 대상:
+
+- /docs
+- /redoc
+
+응답에 Swagger UI, ReDoc, openapi.json이 있으면 FastAPI API 문서가 노출된 것으로 판단한다.
+
+생성 finding 예:
+
+runtime.custom.docs-exposure.docs
+runtime.custom.docs-exposure.redoc
+
+
+17. reflected-xss
+
+check_reflected_xss():
+
+payload:
+
+"><script>alert("runtime-validation-xss")</script>
+
+요청:
+
+/posts?keyword=<payload>
+
+판단:
+
+응답 HTML에 payload가 그대로 들어 있으면 XSS 위험으로 판단한다.
+
+생성 finding:
+
+runtime.custom.reflected-xss.keyword
+
+severity는 high다.
+
+
+18. search-sqli
+
+check_search_sqli():
+
+기본 payload:
+
+') OR '1'='1' --
+
+요청:
+
+/posts?keyword=<payload>
+
+판단:
+
+검색 결과에 비공개 게시글 문구가 섞여 나오면 SQL Injection으로 공개 검색에서 private data가 노출된 것으로 판단한다.
+
+확인 marker:
+
+- user1 비공개 게시글
+- user2 비공개 게시글
+- IDOR 확인용 비공개 글
+
+생성 finding:
+
+runtime.custom.search-sqli.private-posts
+
+severity는 high다.
+
+
+19. 인증 세션 처리
+
+create_session_opener():
+CookieJar를 만들고 HTTPCookieProcessor를 붙인 opener를 반환한다.
+
+login():
+
+1. /login에 POST 요청
+2. username/password form 전송
+3. session cookie를 opener에 저장
+4. opener를 반환
+
+admin-access와 idor는 이 opener를 사용해서 로그인 상태를 유지한다.
+
+
+20. admin-access
+
+check_admin_access():
+
+흐름:
+
+1. user1/password123으로 로그인
+2. /admin 요청
+3. 응답에 운영 관리, 회원 목록, 게시글 관리 문구가 있는지 확인
+4. 일반 사용자가 관리자 화면에 접근하면 finding 생성
+
+생성 finding:
+
+runtime.custom.admin-access.user-role
+
+severity는 high다.
+
+
+21. idor
+
+check_idor():
+
+흐름:
+
+1. user1/password123으로 로그인
+2. /posts/private/4 요청
+3. 비공개 글 내용이 보이는지 확인
+4. 보이면 다른 사용자의 private post 접근 가능으로 판단
+
+기본 private post id가 4인 이유:
+B파트 seed 기준으로 4번 게시글이 user2의 비공개 게시글이기 때문이다.
+
+생성 finding:
+
+runtime.custom.idor.private-post
+
+severity는 high다.
+
+
+22. ZAP 결과 파싱
+
+parse_zap_report():
+
+흐름:
+
+1. zap-report.json 경로를 Path로 변환
+2. 파일이 없으면 빈 리스트 반환
+3. JSON 파일 읽기
+4. JSON 파싱 실패 시 runtime.zap.parse-error medium finding 반환
+5. alert를 하나씩 순회
+6. pluginid, title, riskcode, description, location 추출
+7. runtime.zap.<pluginid> finding 생성
+
+ZAP 파일이 없다고 실패로 보지 않는 이유:
+runtime-validation.py는 ZAP 실행 도구가 아니라 ZAP 결과가 있으면 파싱하는 도구이기 때문이다.
+
+
+23. Nuclei 결과 파싱
+
+parse_nuclei_report():
+
+Nuclei 원본 JSONL을 한 줄씩 읽어 runtime.nuclei.<template-id> finding으로 변환한다.
+
+JSONL은 한 줄에 JSON 객체 하나가 들어 있는 형식이다.
+Nuclei는 여러 finding을 streaming 형태로 저장하기 때문에 JSONL을 사용한다.
+
+severity 매핑:
+
+- critical -> critical
+- high -> high
+- medium -> medium
+- low -> low
+- info/unknown -> low
+
+Nuclei 파일이 없다고 실패로 보지 않는 이유:
+Nuclei 실행 결과가 없는 환경에서도 Health, Smoke, Header, Custom, ZAP 검증은 계속 수행되어야 하기 때문이다.
+
+
+24. Dynatrace 결과 파싱
+
+parse_dynatrace_problems():
+
+Dynatrace Problems API v2 원본 JSON의 problems 배열을 읽어 runtime.dynatrace.<problem-id> finding으로 변환한다.
+
+severity 매핑:
+
+- AVAILABILITY/ERROR/MONITORING_UNAVAILABLE -> high
+- PERFORMANCE/RESOURCE_CONTENTION/CUSTOM_ALERT -> medium
+- INFO/unknown -> low
+
+status가 CLOSED인 문제는 현재 열린 Runtime 장애가 아니므로 제외한다.
+API warning이나 JSON 파싱 실패는 진단 누락 가능성을 알리기 위해 medium finding으로 기록한다.
+
+
+25. decide_status()
+
+findings 전체를 보고 최종 status를 정한다.
+
+- critical/high/secret이 하나라도 있으면 failed
+- finding이 있지만 high 이상이 없으면 warning
+- finding이 없으면 passed
+
+
+26. build_report()
+
+전체 검사를 조립하는 중심 함수다.
+
+흐름:
+
+1. base_url 확인
+2. URL이 없으면 runtime.target-url.missing medium finding 추가
+3. URL 형식이 잘못되면 runtime.target-url.invalid medium finding 추가
+4. Health 기대 status 파싱
+5. Smoke Test 경로 파싱
+6. Required Headers 파싱
+7. check_health 실행
+8. check_smoke 실행
+9. check_headers 실행
+10. check_custom_runtime 실행
+11. parse_zap_report 실행
+12. parse_nuclei_report 실행
+13. parse_dynatrace_problems 실행
+14. status/tool/findings 구조로 report 반환
+
+
+27. parse_args()
+
+환경변수와 명령어 옵션을 읽는 함수다.
+
+지원 옵션:
+
+- --base-url
+- --health-path
+- --health-expected-status
+- --smoke-paths
+- --required-headers
+- --zap-report
+- --nuclei-report
+- --dynatrace-problems
+- --custom-checks
+- --custom-username
+- --custom-password
+- --custom-private-post-id
+- --custom-sqli-payload
+- --output
+- --timeout
+- --fail-on-failed
+
+GitHub Actions에서는 주로 환경변수를 사용하고, 로컬 테스트에서는 CLI 옵션을 사용할 수 있다.
+
+
+28. main()
+
+프로그램 시작점이다.
+
+흐름:
+
+1. parse_args()로 설정 읽기
+2. build_report()로 검사 실행
+3. output 경로 생성
+4. json.dump()로 runtime-report.json 저장
+5. 결과 status와 finding 개수 출력
+6. --fail-on-failed 옵션이 있고 status가 failed면 exit 1
+
+
+29. B파트 앱 기준 실행 예시
+
+RUNTIME_BASE_URL=http://127.0.0.1:8000 \
+HEALTH_CHECK_PATH=/posts \
+HEALTH_EXPECTED_STATUS=200 \
+SMOKE_TEST_PATHS="/login=200,/posts=200,/upload=200|303,/docs=200,/redoc=200" \
+REQUIRED_SECURITY_HEADERS="x-content-type-options,x-frame-options,content-security-policy" \
+CUSTOM_RUNTIME_CHECKS="debug-exposure,docs-exposure,reflected-xss,search-sqli,admin-access,idor" \
+python scripts/runtime-validation.py
+
+
+30. A파트에 전달할 PR 실행 흐름
+
+1. B파트 앱 임시 실행
+   - PostgreSQL: web/docker-compose.yml의 postgres 서비스
+   - FastAPI: uvicorn app.main:app --host 0.0.0.0 --port 8000
+2. GET /posts가 200이 될 때까지 대기
+3. ZAP Baseline 실행
+4. security/reports/zap-report.json 생성
+5. Nuclei 실행
+6. security/reports/nuclei-report.jsonl 생성
+7. 고정 Staging 배포 후에는 fetch-dynatrace-problems.py 실행
+8. security/reports/dynatrace-problems.json 생성
+9. Runtime Validation 실행
+10. security/reports/runtime-report.json 생성
+11. Artifact 업로드
+12. 임시 앱과 PostgreSQL 종료
+
+D파트는 Workflow YAML을 직접 수정하지 않고, 위 실행 기준과 명령어를 A파트에 전달한다.
+
+
+31. Dynatrace 수집 스크립트
+
+scripts/fetch-dynatrace-problems.py는 다음 역할을 한다.
+
+1. DYNATRACE_ENV_URL과 DYNATRACE_API_TOKEN 환경변수를 읽는다.
+2. /api/v2/problems에 최근 30분의 열린 문제를 요청한다.
+3. nextPageKey가 있으면 다음 페이지까지 반복해서 읽는다.
+4. security/reports/dynatrace-problems.json에 problems와 warnings를 저장한다.
+
+토큰은 명령어 옵션으로 받지 않는다. 명령 기록과 결과 파일에 토큰이 남는 것을 막기 위해 환경변수로만 읽는다.
+이 스크립트가 원본을 수집하고 runtime-validation.py가 팀 공통 finding으로 변환한다.
+
+
+32. 한 줄 요약
+
+Runtime Validation v4는 실행 중인 웹 애플리케이션의 Health, Smoke, Security Header, Custom Runtime Check와 OWASP ZAP, Nuclei, Dynatrace 결과를 공통 스키마의 security/reports/runtime-report.json으로 통합하는 D파트 최종 제출용 구현이다.
