@@ -112,7 +112,7 @@ steps:
 | Semgrep 실행 명령어            | `semgrep scan --config auto . --json --output security/reports/sast-report.json` | 확정       |
 | Semgrep 설정 파일 경로         | 별도 파일 없음 (`--config auto`)                                                | 초기 확정  |
 | SAST 결과 파일 경로            | `security/reports/sast-report.json`                                             | A파트 고정 |
-| Gitleaks 실행 명령어           | `gitleaks git . --report-format json --report-path security/reports/secret-report.json --redact=100 --exit-code 0 --no-banner` | 확정       |
+| Secret Scan 실행 명령어        | `semgrep scan --config p/secrets . --json --output security/reports/secret-report.json` | 확정       |
 | Secret Scan 결과 파일 경로     | `security/reports/secret-report.json`     | A파트 고정 |
 | Trivy 실행 명령어 (fs)     | `trivy fs --scanners vuln --file-patterns "pip:requirements-legacy.txt" --format json --output security/reports/dependency-report.json --exit-code 0 --no-progress .` | 확정 |
 | Trivy 실행 명령어 (image)  | Dockerfile 존재 시 `docker build` 후 `trivy image ...` (CVE JSON + CycloneDX 분리 실행). 모노레포는 `dockerfile_path` / `docker_build_context` 명시 | 확정 |

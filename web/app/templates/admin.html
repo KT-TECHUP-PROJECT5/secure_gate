@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}운영 관리 · 모아{% endblock %}
+{% block content %}
+<div class="page-heading row-heading">
+    <div><span class="eyebrow">OPERATIONS</span><h1>운영 관리</h1><p>회원과 커뮤니티 콘텐츠를 관리합니다.</p></div>
+    <a class="button button-ghost" href="/admin/security-events">활동 기록</a>
+</div>
+<div class="stats-grid">
+    <div class="stat-card"><strong>{{ users|length }}</strong><span>전체 회원</span></div>
+    <div class="stat-card"><strong>{{ posts|length }}</strong><span>게시글</span></div>
+    <div class="stat-card"><strong>{{ comments|length }}</strong><span>댓글</span></div>
+</div>
+<section class="panel admin-section">
+    <h2>회원 목록</h2>
+    <div class="member-grid">
+        {% for user_item in users %}
+        <div class="member-card"><span class="avatar">{{ user_item.nickname[0] }}</span><span><strong>{{ user_item.nickname }}</strong><small>@{{ user_item.username }} · {{ user_item.role }}</small></span></div>
+        {% endfor %}
+    </div>
+</section>
+<section class="panel admin-section">
+    <h2>게시글 관리</h2>
+    {% for item in posts %}
+    <div class="manage-row"><span><strong>{{ item.title }}</strong><small>{{ item.author }}</small></span><form method="post" action="/posts/{{ item.id }}/delete"><button class="danger-button" type="submit">삭제</button></form></div>
+    {% endfor %}
+</section>
+{% endblock %}

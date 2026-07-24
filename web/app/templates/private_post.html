@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ post.title }} · 모아{% endblock %}
+{% block content %}
+<div class="narrow-layout">
+    <a class="back-link" href="/posts/mine">← 내 게시글로</a>
+    <article class="panel article-card">
+        <header class="article-head">
+            <span class="visibility-badge private">비공개</span>
+            <h1>{{ post.title }}</h1>
+            <div class="author-line">
+                <span class="avatar">{{ post.author[0] }}</span>
+                <span><strong>{{ post.author }}</strong><small>{{ post.created_at.strftime('%Y.%m.%d %H:%M') }}</small></span>
+            </div>
+        </header>
+        <div class="article-body">
+            <!-- LAB: 작성자가 다른 계정으로 URL 직접 접근 -->
+            {{ post.content | safe }}
+        </div>
+    </article>
+</div>
+{% endblock %}
