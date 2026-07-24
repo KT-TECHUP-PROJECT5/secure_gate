@@ -10,6 +10,7 @@ Scanner errors, timeouts, missing reports, and invalid JSON return exit code 2.
 import argparse
 import json
 import os
+import stat
 import subprocess
 import sys
 import uuid
@@ -112,6 +113,17 @@ def validate_target_url(target_url):
 
 def unique_container_name():
     return f"secure-gate-zap-{uuid.uuid4().hex[:12]}"
+
+
+def prepare_reports_directory(reports_dir):
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        mode = stat.S_IMODE(reports_dir.stat().st_mode)
+        reports_dir.chmod(mode | stat.S_IWOTH)
+    except OSError as error:
+        raise ZapExecutionError(
+            f"Could not make ZAP reports directory container-writable: {error}"
+        ) from error
 
 
 def cleanup_container(container_name):
@@ -260,11 +272,11 @@ def parse_args():
 def main():
     args = parse_args()
     reports_dir = args.reports_dir.resolve()
-    reports_dir.mkdir(parents=True, exist_ok=True)
-    report_path = reports_dir / "zap-report.json"
-    report_path.unlink(missing_ok=True)
 
     try:
+        prepare_reports_directory(reports_dir)
+        report_path = reports_dir / "zap-report.json"
+        report_path.unlink(missing_ok=True)
         validate_target_url(args.target_url)
         container_name = unique_container_name()
         command = build_zap_command(args, reports_dir, container_name)

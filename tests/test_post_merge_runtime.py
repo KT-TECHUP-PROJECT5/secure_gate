@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -111,6 +112,15 @@ class NucleiProfileTests(unittest.TestCase):
 
 
 class ZapProfileTests(unittest.TestCase):
+    def test_reports_directory_is_writable_by_zap_container_user(self):
+        with tempfile.TemporaryDirectory() as temp_directory:
+            reports_dir = Path(temp_directory) / "reports"
+
+            zap_validation.prepare_reports_directory(reports_dir)
+
+            mode = stat.S_IMODE(reports_dir.stat().st_mode)
+            self.assertTrue(mode & stat.S_IWOTH)
+
     def test_pr_profile_uses_baseline_scan(self):
         args = zap_validation.apply_profile_defaults(zap_profile_args("pr"))
 
