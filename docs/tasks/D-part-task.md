@@ -2,7 +2,7 @@
 문서명: D파트 Runtime Validation 작업 체크리스트
 최신화: 2026-07-23
 작성자: D파트
-Version: 1.9.0
+Version: 1.10.0
 ---
 
 # D파트 Runtime Validation 작업 체크리스트
@@ -27,8 +27,9 @@ D파트는 실행 중인 테스트/Staging 환경을 대상으로 런타임 보�
 - [x] Nuclei 기본 검사, Trivy CVE 조건부 검사와 결과 통합 실행기 구현: `scripts/run-nuclei-validation.py`
 - [x] 외부 Next.js 포트폴리오로 Trivy-Nuclei 수동 연동 검증
 - [x] 공용 Staging에서 통합 실행기 검증: 기본 XSS 2건, CVE 후보 8개, 매칭 템플릿 0개
-- [x] Dynatrace Problems API v2 결과 수집 스크립트 구현
+- [x] Dynatrace Problems API v2와 Service entities 결과 수집 스크립트 구현
 - [x] Dynatrace 열린 문제를 공통 Runtime finding으로 변환
+- [x] Dynatrace 서비스 엔티티 미탐지를 High Runtime finding으로 변환
 - [x] 공통 결과 스키마 그대로 출력 구현
 - [x] PR Workflow에 전달할 Runtime Validation 실행 기준 작성
 - [x] PR Workflow에 전달할 ZAP Baseline 실행 기준 작성
@@ -58,14 +59,16 @@ D파트는 실행 중인 테스트/Staging 환경을 대상으로 런타임 보�
 - [ ] Trivy High/Critical finding이 Nuclei 결과와 관계없이 Aggregator에 유지되는지 확인
 - [x] 기존 ECS Service가 OneAgent 없는 `secure-gate-dast:1`을 사용한 상태 확인
 - [x] ECS Fargate OneAgent application-only 연동 방식 확정
-- [x] OneAgent 설정이 포함된 `secure-gate-dast:2` 등록 확인
+- [x] OneAgent 설정이 포함된 `secure-gate-dast:4` 등록 확인
 - [x] AWS Secret 생성과 Task Execution Role 읽기 권한 추가 확인
 - [x] PaaS Token 생성과 Connection Info 조회 완료
 - [x] AWS Secret의 세 필수 Key 실제 값 등록 확인
-- [x] ECS Service를 `secure-gate-dast:2`로 배포
+- [x] ECS Service를 `secure-gate-dast:4`로 배포
 - [x] `initoneagent` exit code `0`, `web` RUNNING, ALB Target healthy 확인
+- [x] Uvicorn 프로세스의 `liboneagentproc.so` 로드 확인
+- [x] CloudWatch에서 Python Agent 로드와 Dynatrace endpoint 연결 성공 확인
 - [x] Staging `GET /posts` HTTP `200` 확인
-- [ ] Dynatrace `Services`의 Python/FastAPI 데이터 유입 확인
+- [x] Dynatrace `Services`에서 `OWASP practice board DAST` 서비스와 `/posts` 트레이스 확인
 - [x] Dynatrace Synthetic HTTP Monitor 생성: `secure-gate-staging-health`
 - [x] Synthetic Monitor 실행 결과 확인: `Success`, Availability `100%`, HTTP `200`
 - [ ] A파트의 Dynatrace Repository Variable/Secret 및 실행 step 연결 확인
@@ -93,8 +96,8 @@ D파트는 실행 중인 테스트/Staging 환경을 대상으로 런타임 보�
 | `RUNTIME_BASE_URL` | PR 임시 환경: `http://127.0.0.1:8000` |
 | `STAGING_URL` | 공용 Staging: `http://www.securegate.n-e.kr` |
 | Staging 실행 환경 | ECS Cluster/Service `secure-gate-dast`, Launch Type `FARGATE` |
-| 현재 Staging Task | Task Definition `secure-gate-dast:2`, container `web:8000`, process `uvicorn` |
-| OneAgent 배포 상태 | `initoneagent` exit code `0`, `web` RUNNING, ALB Target `10.42.0.240:8000` healthy |
+| 현재 Staging Task | Task Definition `secure-gate-dast:4`, container `web:8000`, process `uvicorn` |
+| OneAgent 배포 상태 | `initoneagent` exit code `0`, `web` RUNNING, 새 ALB Target healthy, Agent 주입·endpoint 통신 확인 |
 | `HEALTH_CHECK_PATH` | `/posts` |
 | `HEALTH_EXPECTED_STATUS` | `200` |
 | `SMOKE_TEST_PATHS` | `/login=200,/posts=200,/upload=200|303,/docs=200,/redoc=200` |
@@ -107,13 +110,14 @@ D파트는 실행 중인 테스트/Staging 환경을 대상으로 런타임 보�
 | `ZAP_REPORT_PATH` | `security/reports/zap-report.json` |
 | `NUCLEI_REPORT_PATH` | `security/reports/nuclei-report.jsonl` |
 | `DYNATRACE_ENV_URL` | `https://xlj20734.live.dynatrace.com` |
-| `DYNATRACE_PROBLEM_SELECTOR` | `status("open"),entityTags("environment:staging")` |
+| `DYNATRACE_PROBLEM_SELECTOR` | `status("open")` |
+| `DYNATRACE_SERVICE_ENTITY_SELECTOR` | `type("SERVICE")` |
 | Dynatrace Synthetic Monitor | `secure-gate-staging-health` / `HTTP_CHECK-D9507A08C7F0DC5E` / Busan / 5분 |
 | `DYNATRACE_FROM` | `now-30m` |
 | `DYNATRACE_PROBLEMS_PATH` | `security/reports/dynatrace-problems.json` |
-| GitHub Secret `DYNATRACE_TOKEN` | `problems.read` 범위의 읽기 전용 토큰. 코드에는 저장하지 않음 |
+| GitHub Secret `DYNATRACE_TOKEN` | `problems.read`, `entities.read` 범위의 읽기 전용 토큰. 코드에는 저장하지 않음 |
 | ECS OneAgent Secret | `secure-gate/dynatrace/fargate`. 실제 값과 전체 ARN은 문서에 저장하지 않음 |
-| ECS OneAgent Secret Key | `DT_PAAS_TOKEN`, `DT_TENANTTOKEN`, `DT_CONNECTION_POINT` |
+| ECS OneAgent Secret Key | `DT_PAAS_TOKEN`, `DT_TENANT`, `DT_TENANTTOKEN`, `DT_CONNECTION_POINT` |
 | Trivy 원본 JSON | `security/reports/dependency-report.json`, Artifact `dependency-report` |
 | Nuclei CVE ID 입력 | `security/reports/nuclei-cve-ids.txt` |
 | Nuclei CVE 매칭 템플릿 | `security/reports/nuclei-cve-matched-templates.txt` |
@@ -200,8 +204,9 @@ security/reports/runtime-report.json
 - CVE 우선 검사는 일반 XSS 등 CVE 번호가 없는 취약점을 대신하지 않으므로 기존 Nuclei 기본 검사와 함께 실행한다.
 - ZAP 결과는 `security/reports/zap-report.json`을 읽어 `runtime.zap.<pluginid>` finding으로 변환한다.
 - Nuclei 결과는 `security/reports/nuclei-report.jsonl`을 읽어 `runtime.nuclei.<template-id>` finding으로 변환한다.
-- `fetch-dynatrace-problems.py`는 `problems.read` 토큰으로 열린 Staging 문제를 `security/reports/dynatrace-problems.json`에 저장한다.
+- `fetch-dynatrace-problems.py`는 `problems.read`, `entities.read` 토큰으로 열린 문제와 최근 서비스 엔티티를 `security/reports/dynatrace-problems.json`에 저장한다.
+- `serviceCoverage.status`가 `not_detected`이면 OneAgent 통신 여부와 별개로 APM 서비스가 생성되지 않은 상태이므로 High finding으로 기록한다.
 - Dynatrace `AVAILABILITY`, `ERROR`, `MONITORING_UNAVAILABLE`은 High, 성능·리소스·Custom Alert는 Medium, Info는 Low로 변환한다.
-- ECS Service는 OneAgent Code Module이 포함된 revision 2로 배포됐고 `initoneagent`, `web`, ALB Health Check는 정상이다.
-- D파트가 정상 요청 15건을 발생시킨 뒤 확인했지만 Dynatrace `Services`에는 아직 서비스가 표시되지 않아 런타임 주입 설정과 OneAgent 로그를 추가 점검해야 한다.
+- ECS Service는 OneAgent Code Module이 포함된 revision 4로 배포됐고 `initoneagent`, `web`, ALB Health Check는 정상이다.
+- Python 전역 모니터링과 FastAPI 계측 활성화 후 ECS Service를 강제 재배포했으며, Dynatrace `Services`에서 `OWASP practice board DAST` 서비스와 `/posts` HTTP 200 트레이스 수집을 확인했다.
 - 최종 Merge 차단 여부는 E파트 Policy Evaluator의 정책 기준에 따른다.

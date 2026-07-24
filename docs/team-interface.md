@@ -134,7 +134,7 @@ steps:
 | PR 단계 실행 방식                 | GitHub Actions Runner 내부에서 B파트 앱을 임시 실행. PostgreSQL은 `web/docker-compose.yml`, FastAPI는 `uvicorn` 사용 | D파트 전달 완료 / A파트 연결 필요 |
 | PR 단계 Runtime URL               | 고정 URL이 없으면 `RUNTIME_BASE_URL=http://127.0.0.1:8000` 사용 | D파트 전달 완료 |
 | 외부 Staging URL                  | `STAGING_URL=http://www.securegate.n-e.kr` | 확정 / A파트 Variable 연결 필요 |
-| Staging 실행 환경                 | ECS Cluster/Service `secure-gate-dast`, Launch Type `FARGATE`, 현재 `secure-gate-dast:2`, container `web:8000` | Revision 2 배포 완료 / ALB healthy |
+| Staging 실행 환경                 | ECS Cluster/Service `secure-gate-dast`, Launch Type `FARGATE`, 현재 `secure-gate-dast:4`, container `web:8000` | Revision 4 배포 완료 / ALB healthy |
 | Health Check Endpoint             | `HEALTH_CHECK_PATH=/posts`, 기대 상태 코드 `200` | D파트 기준 확정 |
 | Smoke Test 실행 경로              | `SMOKE_TEST_PATHS="/login=200,/posts=200,/upload=200\|303,/docs=200,/redoc=200"` | D파트 기준 확정 |
 | PR ZAP 실행 명령어                | `zap-baseline.py` 실행 후 `security/reports/zap-report.json` 저장 | D파트 전달 완료 / A파트 연결 필요 |
@@ -147,11 +147,11 @@ steps:
 | Staging Nuclei 검증               | `http://www.securegate.n-e.kr/posts` 기준 Trivy CVE 후보 8개, 매칭 템플릿 0개, 기본 XSS finding 2개. CVE 검사는 `skipped: no-matching-nuclei-template` | D파트 검증 완료 |
 | Nuclei CVE coverage 파일          | `security/reports/nuclei-cve-coverage.json`에 후보 수, 매칭 템플릿 수, 기본/CVE/통합 finding 수와 skip/failure 사유 기록 | D파트 구현 완료 / A파트 Artifact 포함 필요 |
 | Custom Runtime Check              | `debug-exposure`, `docs-exposure`, `reflected-xss`, `search-sqli`, `admin-access`, `idor` | D파트 구현 완료 |
-| Dynatrace Environment             | `https://xlj20734.live.dynatrace.com`. OneAgent Code Module을 포함한 revision 2 배포, `initoneagent` exit code `0`, `web` RUNNING | 배포 정상 / Services 데이터 유입 추가 확인 필요 |
+| Dynatrace Environment             | `https://xlj20734.live.dynatrace.com`. revision 4 강제 재배포, Python/FastAPI 계측 활성화, `OWASP practice board DAST` 서비스와 `/posts` HTTP 200 트레이스 확인 | 배포·통신·APM 서비스 탐지 정상 |
 | Dynatrace Synthetic Monitor       | `secure-gate-staging-health`, `GET /posts`, 5분, Busan, `environment:staging` / `service:secure-gate` | 생성 완료 / Success·Availability 100%·HTTP 200 확인 |
-| Dynatrace ECS Secret              | `secure-gate/dynatrace/fargate`, Key `DT_PAAS_TOKEN`, `DT_TENANTTOKEN`, `DT_CONNECTION_POINT`. 실제 값과 전체 ARN은 문서에 기록하지 않음 | Secret 값 등록·IAM 권한·revision 2 배포 완료 |
-| Dynatrace 수집                     | `scripts/fetch-dynatrace-problems.py`로 열린 문제를 `security/reports/dynatrace-problems.json`에 저장 | D파트 구현 완료 / A파트 연결 필요 |
-| Dynatrace Secret 매핑              | Workflow의 `DYNATRACE_TOKEN`을 스크립트 환경변수 `DYNATRACE_API_TOKEN`으로 전달. 토큰 범위는 `problems.read`만 사용 | A파트 연결 필요 |
+| Dynatrace ECS Secret              | `secure-gate/dynatrace/fargate`, Key `DT_PAAS_TOKEN`, `DT_TENANT`, `DT_TENANTTOKEN`, `DT_CONNECTION_POINT`. 실제 값과 전체 ARN은 문서에 기록하지 않음 | connectioninfo 일치·IAM 권한·revision 4 배포 완료 |
+| Dynatrace 수집                     | `scripts/fetch-dynatrace-problems.py`로 열린 문제와 최근 Service entities를 `security/reports/dynatrace-problems.json`에 저장. 서비스 0건은 High finding | D파트 구현 완료 / A파트 연결 필요 |
+| Dynatrace Secret 매핑              | Workflow의 `DYNATRACE_TOKEN`을 스크립트 환경변수 `DYNATRACE_API_TOKEN`으로 전달. 토큰 범위는 `problems.read`, `entities.read` | A파트 연결 필요 |
 | Runtime Validation 결과 파일 경로 | `security/reports/runtime-report.json` | A파트 고정 |
 | 보안 헤더 검증 기준               | CSP, X-Frame-Options, X-Content-Type-Options 등 | 초기 확정 |
 | Runtime Validation 실패 기준      | 통합 finding의 Critical/High → Policy Evaluator | 확정 방향 |

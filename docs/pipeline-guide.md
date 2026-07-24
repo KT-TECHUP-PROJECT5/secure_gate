@@ -150,7 +150,7 @@ jobs:
 | Secret | 필수 | 설명 |
 | --- | --- | --- |
 | `GITHUB_TOKEN` | 자동 | PR 댓글용 (`secrets: inherit` 권장) |
-| `DYNATRACE_TOKEN` | 선택 | Dynatrace Problems API 조회용. `problems.read` 범위의 읽기 전용 토큰을 등록하고 실행 step에서 `DYNATRACE_API_TOKEN`으로 매핑한다. |
+| `DYNATRACE_TOKEN` | 선택 | Dynatrace Problems와 Service entities 조회용. `problems.read`, `entities.read` 범위의 읽기 전용 토큰을 등록하고 실행 step에서 `DYNATRACE_API_TOKEN`으로 매핑한다. |
 | `DEPENDENCY_TRACK_URL` | 선택 | Dependency-Track **Backend API** base URL (UI 전용 주소 아님) |
 | `DEPENDENCY_TRACK_API_KEY` | 선택 | Dependency-Track API Key |
 
@@ -162,7 +162,8 @@ Dynatrace 연동에 필요한 D파트 전달값은 다음과 같다. 현재 Work
 | --- | --- |
 | Environment URL | `https://xlj20734.live.dynatrace.com` |
 | Staging URL | `http://www.securegate.n-e.kr` |
-| Problem Selector | `status("open"),entityTags("environment:staging")` |
+| Problem Selector | `status("open")` |
+| Service Entity Selector | `type("SERVICE")` |
 | 수집 스크립트 | `scripts/fetch-dynatrace-problems.py` |
 | 원본 결과 | `security/reports/dynatrace-problems.json` |
 | 통합 결과 | `security/reports/runtime-report.json` |
@@ -363,7 +364,7 @@ security/reports/
 | `scripts/evaluate-gate.py` | 정책 기준 Pass/Fail 판단 |
 | `scripts/create-pr-comment.py` | GitHub API로 PR 댓글 작성 |
 | `scripts/runtime-validation.py` | Health / Smoke / Header / Custom Check / ZAP / Nuclei / Dynatrace 결과를 `runtime-report.json`으로 생성 |
-| `scripts/fetch-dynatrace-problems.py` | Dynatrace Problems API v2의 열린 문제를 JSON으로 수집 |
+| `scripts/fetch-dynatrace-problems.py` | Dynatrace Problems API v2의 열린 문제와 최근 Service entities를 JSON으로 수집 |
 | `scripts/trivy-to-nuclei.py` | Trivy 원본 JSON의 High/Critical CVE를 Nuclei template ID 입력 파일로 변환 |
 | `scripts/run-nuclei-validation.py` | Nuclei 기본 검사, Trivy CVE 조건부 검사, JSONL 통합과 coverage 결과 생성 |
 | `scripts/upload-sbom-to-dependency-track.py` | CycloneDX SBOM을 기존 DT 프로젝트 UUID에 업로드 |

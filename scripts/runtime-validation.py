@@ -5,8 +5,8 @@ runtime-validation.py
 D part Runtime Validation submission script.
 
 It checks a running application, converts optional OWASP ZAP and Nuclei reports,
-converts optional Dynatrace Problems API results, and writes the team common
-schema to security/reports/runtime-report.json.
+converts optional Dynatrace Problems API and service coverage results, and writes
+the team common schema to security/reports/runtime-report.json.
 """
 
 import argparse
@@ -950,6 +950,32 @@ def parse_dynatrace_problems(dynatrace_problems_path):
         ]
 
     findings = []
+    service_coverage = data.get("serviceCoverage")
+    if service_coverage is not None:
+        if not isinstance(service_coverage, dict):
+            findings.append(
+                make_finding(
+                    "runtime.dynatrace.service-coverage.invalid",
+                    "medium",
+                    "Dynatrace service coverage has unexpected structure",
+                    "Expected serviceCoverage to be a JSON object.",
+                    str(path),
+                )
+            )
+        elif service_coverage.get("status") == "not_detected":
+            findings.append(
+                make_finding(
+                    "runtime.dynatrace.service-not-detected",
+                    "high",
+                    "Dynatrace did not detect an application service",
+                    (
+                        "OneAgent may be connected, but no service entity was observed "
+                        f"from {service_coverage.get('from') or 'the configured time range'}."
+                    ),
+                    str(path),
+                )
+            )
+
     warnings = data.get("warnings") or []
     if isinstance(warnings, list):
         for index, warning in enumerate(warnings, start=1):

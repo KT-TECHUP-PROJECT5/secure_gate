@@ -543,6 +543,11 @@ Nuclei 실행 결과가 없는 환경에서도 Health, Smoke, Header, Custom, ZA
 parse_dynatrace_problems():
 
 Dynatrace Problems API v2 원본 JSON의 problems 배열을 읽어 runtime.dynatrace.<problem-id> finding으로 변환한다.
+같은 파일에 serviceCoverage가 있으면 서비스 엔티티 탐지 상태도 함께 확인한다.
+
+serviceCoverage.status가 not_detected이면 OneAgent 프로세스 주입이나 통신이 성공했더라도 실제 APM 서비스가 만들어지지 않은 상태다.
+이 경우 runtime.dynatrace.service-not-detected High finding을 만든다.
+serviceCoverage가 없는 기존 결과 파일은 이전 형식과의 호환을 위해 서비스 탐지 여부를 판정하지 않는다.
 
 severity 매핑:
 

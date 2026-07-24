@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Fetch Dynatrace Problems API v2 results for Runtime Validation.
+Fetch Dynatrace Problems API v2 results and service coverage for Runtime Validation.
 
 The API token is read only from DYNATRACE_API_TOKEN so it is not exposed in
 command arguments or stored in the generated JSON report.
@@ -128,8 +128,55 @@ def fetch_problems(args, api_token):
     }
 
 
+def fetch_service_coverage(args, api_token):
+    endpoint = f"{normalize_environment_url(args.environment_url)}/api/v2/entities"
+    parameters = {
+        "entitySelector": args.service_entity_selector,
+        "from": args.from_time,
+        "pageSize": str(args.page_size),
+    }
+    if args.to_time:
+        parameters["to"] = args.to_time
+
+    services = []
+    while True:
+        request_url = f"{endpoint}?{urllib.parse.urlencode(parameters)}"
+        page = read_json_response(request_url, api_token, args.timeout)
+
+        if not isinstance(page, dict) or not isinstance(page.get("entities"), list):
+            raise RuntimeError("Dynatrace API response must contain an entities array")
+
+        for entity in page["entities"]:
+            if not isinstance(entity, dict):
+                continue
+            services.append(
+                {
+                    "entityId": entity.get("entityId"),
+                    "displayName": entity.get("displayName"),
+                    "firstSeenTms": entity.get("firstSeenTms"),
+                    "lastSeenTms": entity.get("lastSeenTms"),
+                }
+            )
+
+        next_page_key = page.get("nextPageKey")
+        if not next_page_key:
+            break
+
+        parameters = {"nextPageKey": next_page_key}
+
+    return {
+        "status": "detected" if services else "not_detected",
+        "totalCount": len(services),
+        "entitySelector": args.service_entity_selector,
+        "from": args.from_time,
+        "services": services,
+    }
+
+
 def parse_args():
-    parser = argparse.ArgumentParser(description="Fetch Dynatrace Problems API v2 results.")
+    parser = argparse.ArgumentParser(
+        description="Fetch Dynatrace Problems API v2 results and service coverage."
+    )
     parser.add_argument(
         "--environment-url",
         default=env_or_default("DYNATRACE_ENV_URL", ""),
@@ -156,6 +203,18 @@ def parse_args():
         help="Optional Dynatrace entity selector",
     )
     parser.add_argument(
+        "--service-entity-selector",
+        default=env_or_default("DYNATRACE_SERVICE_ENTITY_SELECTOR", 'type("SERVICE")'),
+        help='Service entity selector (default: type("SERVICE"))',
+    )
+    parser.add_argument(
+        "--skip-service-check",
+        action="store_true",
+        default=env_or_default("DYNATRACE_SKIP_SERVICE_CHECK", "").lower()
+        in {"1", "true", "yes"},
+        help="Fetch problems without checking whether Dynatrace detected a service",
+    )
+    parser.add_argument(
         "--page-size",
         type=int,
         default=DEFAULT_PAGE_SIZE,
@@ -179,6 +238,8 @@ def main():
             raise ValueError("DYNATRACE_ENV_URL is required")
         api_token = read_api_token()
         report = fetch_problems(args, api_token)
+        if not args.skip_service_check:
+            report["serviceCoverage"] = fetch_service_coverage(args, api_token)
     except (ValueError, RuntimeError) as error:
         print(f"[ERROR] {error}", file=sys.stderr)
         return 2
@@ -188,6 +249,8 @@ def main():
         json.dump(report, file, indent=2)
 
     print(f"[OK] Dynatrace problems: {report['totalCount']}")
+    if "serviceCoverage" in report:
+        print(f"[OK] Dynatrace services: {report['serviceCoverage']['totalCount']}")
     print(f"[OK] Report written to: {args.output}")
     return 0
 

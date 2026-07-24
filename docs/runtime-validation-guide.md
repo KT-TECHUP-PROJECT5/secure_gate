@@ -20,7 +20,7 @@ D파트 Runtime Validation은 실행 중인 테스트/Staging 환경을 대상�
 - OWASP ZAP JSON 결과 연동
 - Nuclei JSONL 결과 연동
 - Trivy High/Critical CVE 기반 Nuclei 우선 검사
-- Dynatrace Problems API v2 결과 연동
+- Dynatrace Problems API v2와 서비스 엔티티 탐지 결과 연동
 
 최종 제출용 실행 파일:
 
@@ -49,9 +49,9 @@ D파트는 Workflow YAML을 직접 수정하지 않고, 아래 실행 방식과 
 | Merge 이후 Nuclei 실행 명령어 | 태그 제한 없이 기본 서명 템플릿을 `low,medium,high,critical` 범위로 실행한다. 전체 timeout은 30분이다. |
 | Nuclei 결과 파일 경로 | 통합 finding은 `security/reports/nuclei-report.jsonl`, CVE 검사 수행 상태는 `security/reports/nuclei-cve-coverage.json` |
 | Trivy CVE 연동 | C파트 `dependency-scan` Job이 생성한 원본 `security/reports/dependency-report.json` Artifact를 A파트가 다운로드한다. `run-nuclei-validation.py`가 High/Critical CVE 추출, 템플릿 사전 확인, 조건부 검사와 결과 통합을 수행한다. |
-| Dynatrace 실행 방식 | ECS Service는 OneAgent Code Module이 포함된 `secure-gate-dast:2`를 실행 중이다. `initoneagent` 종료 코드 `0`, `web` RUNNING, ALB Target healthy를 확인했다. Dynatrace `Services`의 APM 데이터 유입은 별도 확인이 필요하다. |
-| Dynatrace 설정값 | Environment URL은 `https://xlj20734.live.dynatrace.com`, selector는 `status("open"),entityTags("environment:staging")`이다. ECS 설치용 PaaS Token과 Problems API용 `problems.read` 토큰은 분리한다. |
-| Dynatrace 결과 파일 경로 | 원본은 `security/reports/dynatrace-problems.json`, 공통 스키마 통합 결과는 `security/reports/runtime-report.json`이다. |
+| Dynatrace 실행 방식 | ECS Service는 OneAgent Code Module이 포함된 `secure-gate-dast:4`를 실행 중이다. Python Agent가 Uvicorn 프로세스에 로드되고 Dynatrace endpoint에 연결된 것까지 확인했다. `fetch-dynatrace-problems.py`가 Problems와 최근 `SERVICE` 엔티티를 함께 조회한다. |
+| Dynatrace 설정값 | Environment URL은 `https://xlj20734.live.dynatrace.com`, Problem selector는 `status("open")`, Service selector는 `type("SERVICE")`이다. ECS 설치용 PaaS Token과 조회용 `problems.read` + `entities.read` 토큰은 분리한다. APM 엔티티의 `environment:staging` 태그 적용을 확인하기 전에는 Problem selector에 해당 태그 조건을 넣지 않는다. |
+| Dynatrace 결과 파일 경로 | `security/reports/dynatrace-problems.json`에 `problems`와 `serviceCoverage`가 함께 저장되고, 공통 스키마 통합 결과는 `security/reports/runtime-report.json`이다. |
 | 보안 헤더 검증 기준 | HTTP: `x-content-type-options`, `x-frame-options`, `content-security-policy`. HTTPS에서는 `strict-transport-security`를 자동으로 추가한다. |
 | Custom Runtime Check | `debug-exposure`, `docs-exposure`, `reflected-xss`, `search-sqli`, `admin-access`, `idor`를 기본 실행한다. |
 | Runtime Validation 실패 기준 | Critical/High/Secret finding이 하나라도 있으면 `failed`, Medium/Low만 있으면 `warning`, finding이 없으면 `passed`. PR의 Merge 차단과 배포 후 승격 차단은 E파트 Policy Evaluator가 결정한다. |
@@ -65,7 +65,8 @@ STAGING_URL=http://www.securegate.n-e.kr
 ZAP_TARGET_URL=http://www.securegate.n-e.kr/posts
 NUCLEI_TARGET_URL=http://www.securegate.n-e.kr/posts
 DYNATRACE_ENV_URL=https://xlj20734.live.dynatrace.com
-DYNATRACE_PROBLEM_SELECTOR=status("open"),entityTags("environment:staging")
+DYNATRACE_PROBLEM_SELECTOR=status("open")
+DYNATRACE_SERVICE_ENTITY_SELECTOR=type("SERVICE")
 HEALTH_CHECK_PATH=/posts
 SMOKE_TEST_PATHS=/login=200,/posts=200,/upload=200|303,/docs=200,/redoc=200
 ```
@@ -80,12 +81,12 @@ SMOKE_TEST_PATHS=/login=200,/posts=200,/upload=200|303,/docs=200,/redoc=200
 | ECS Cluster | `secure-gate-dast` |
 | ECS Service | `secure-gate-dast` |
 | Launch Type | `FARGATE` |
-| 현재 실행 Task Definition | `secure-gate-dast:2`, 2026-07-23 17:10:43 KST 배포 완료 |
+| 현재 실행 Task Definition | `secure-gate-dast:4`, 2026-07-23 17:49:26 KST 배포 완료 |
 | OneAgent 적용 방식 | `initoneagent`가 Code Module을 공유 볼륨에 복사하고 `web`이 로드 |
 | Container | `web`, port `8000`, process `uvicorn` |
 | ALB Health Check | `GET /posts`, matcher `200-399` |
-| 현재 ALB Target | `10.42.0.240:8000`, 상태 `healthy` |
-| 외부 Health Check | `GET /posts` -> `200`, 확인 시 응답 시간 `0.030271s` |
+| 현재 ALB Target | revision 4의 새 target, 상태 `healthy` |
+| 외부 Health Check | `GET /posts` -> `200`, 확인 시 응답 시간 `0.027061s` |
 | 배포 Repository | `https://github.com/KT-TECHUP-PROJECT5/web` |
 | 배포 Git 기준 | `main` / `1574f7c845e1736dccc3b32120cb02e97c863bad` |
 
@@ -111,7 +112,7 @@ Dynatrace 연동은 세 부분으로 나뉜다.
 ```text
 ECS Fargate Task
 -> ALB를 통해 고정 Staging URL 제공
--> OneAgent Code Module을 포함한 revision 2 실행
+-> OneAgent Code Module을 포함한 revision 4 실행
 -> initoneagent 완료 후 web 컨테이너 기동
 
 Dynatrace Synthetic HTTP Monitor
@@ -123,29 +124,36 @@ Problems API 수집 스크립트
 -> runtime-validation.py가 공통 finding으로 변환
 ```
 
-revision 2 배포와 외부 Synthetic HTTP Monitor는 정상이다. OneAgent APM 데이터가 `Services`에 유입되면 애플리케이션 요청, 오류와 응답시간을 추가로 관찰할 수 있다. Problems API는 열린 문제를 결과 파일로 수집하는 별도 연동이며, 서비스 목록 표시 여부와 동일한 검증이 아니다.
+revision 4 배포, Python Agent 주입과 외부 Synthetic HTTP Monitor는 정상이다. 2026-07-24 Python 전역 모니터링과 `Python FastAPI [Opt-In]` 계측을 활성화한 뒤 ECS Service를 강제 재배포했고, Dynatrace `Services`에서 `OWASP practice board DAST` 서비스와 `/posts` HTTP 200 트레이스를 확인했다. Problems API는 열린 문제를 결과 파일로 수집하는 별도 연동이며, 서비스 목록 표시 여부와 동일한 검증이 아니다.
 
 ### 1. ECS Fargate OneAgent 현재 상태
 
 현재 Staging은 EC2 인스턴스에 직접 접속해 프로세스를 실행하는 구조가 아니다. Fargate에서는 호스트 설치 파일을 실행하지 않고 `initoneagent` 컨테이너가 공유 볼륨에 Python OneAgent Code Module을 복사한 뒤 `web` 컨테이너가 `LD_PRELOAD`로 로드하는 application-only 방식을 사용한다. 따라서 EC2용 `systemctl status oneagent`나 `oneagentctl` 명령은 적용하지 않는다.
 
-2026-07-23 배포 상태:
+2026-07-24 재배포 및 검증 상태:
 
 | 항목 | 상태 |
 | --- | --- |
 | AWS Secrets Manager | `secure-gate/dynatrace/fargate` 생성 완료 |
 | ECS Task Execution Role | Secret 읽기 권한 추가 완료 |
-| OneAgent Task Definition | `secure-gate-dast:2` 등록 및 Service 배포 완료 |
-| 현재 ECS Service | `secure-gate-dast:2`, steady state |
+| OneAgent Task Definition | `secure-gate-dast:4` 등록 및 Service 배포 완료 |
+| 현재 ECS Service | `secure-gate-dast:4`, steady state |
 | Dynatrace 설치용 PaaS Token | Secret 등록 및 배포 사용 완료 |
-| Connection Info | `tenantToken`, `formattedCommunicationEndpoints` 조회 완료 |
-| Secret 필수 Key | `DT_PAAS_TOKEN`, `DT_TENANTTOKEN`, `DT_CONNECTION_POINT` |
-| `initoneagent` | `STOPPED`, exit code `0`, Code Module copy 성공 |
-| `web` | `RUNNING` |
-| ALB Target | `10.42.0.240:8000`, `healthy` |
-| Health Check | `GET /posts` -> `200`, 응답 시간 `0.030271s` |
-| CloudWatch | OneAgent 오류 패턴 `0`, 토큰 접두 문자열 노출 `0` |
-| Dynatrace `Services` | 정상 요청 발생 후에도 서비스 목록 미표시, 추가 점검 필요 |
+| Connection Info | `tenantUUID`, `tenantToken`, `communicationEndpoints`와 Secret 매핑 일치 확인 |
+| Secret 필수 Key | `DT_PAAS_TOKEN`, `DT_TENANT`, `DT_TENANTTOKEN`, `DT_CONNECTION_POINT` |
+| Code Module | `1.341.56.20260720-124252-python`, `linux-x86-64` |
+| `initoneagent` | `STOPPED`, exit code `0`, Python Code Module copy 성공 |
+| `web` | `RUNNING`, `python:3.12-slim`, `linux/amd64` |
+| Agent 주입 | `/proc/<uvicorn PID>/maps`에서 `liboneagentproc.so` 로드 확인 |
+| Agent 통신 | CloudWatch에서 Python Agent 로드 및 communication endpoint 연결 성공 확인 |
+| Python 모니터링 | Environment의 `Monitor Python` 활성화 |
+| FastAPI 계측 | `Python FastAPI [Opt-In]`, `Instrumentation enabled` 활성화 |
+| 진단 로그 | `DT_LOGSTREAM=stdout`, `DT_LOGLEVELCON=INFO` |
+| ALB Target | revision 4의 새 target, `healthy` |
+| Health Check | `GET /posts` -> `200`, 재배포 확인 응답 시간 `0.023734s` |
+| CloudWatch | ERROR 수준 로드 실패 `0`, PaaS Token 접두 문자열 노출 `0` |
+| Dynatrace `Services` | `OWASP practice board DAST` 서비스 1개 탐지 |
+| 분산 추적 | `/posts` HTTP `200`, 응답 시간 약 `4~7ms` 트레이스 수집 확인 |
 
 실제 토큰, Tenant Token, Connection Point, 전체 Secret ARN은 문서나 Git 저장소에 기록하지 않는다.
 
@@ -153,25 +161,30 @@ revision 2 배포와 외부 Synthetic HTTP Monitor는 정상이다. OneAgent APM
 
 ```text
 Secret 세 필수 Key 등록 완료
--> ECS Service를 secure-gate-dast:2로 배포 완료
+-> ECS Service를 secure-gate-dast:4로 배포 완료
 -> initoneagent exit code 0 확인 완료
 -> web RUNNING, ALB Target healthy, GET /posts 200 확인 완료
+-> Uvicorn 프로세스의 liboneagentproc.so 로드 확인 완료
+-> Dynatrace communication endpoint 연결 확인 완료
+-> Python 전역 모니터링과 FastAPI 계측 활성화
+-> ECS Service force new deployment 완료
 -> 정상 요청 트래픽 발생
--> Dynatrace Services에서 Python/FastAPI 데이터 유입 재확인 필요
+-> Dynatrace Services에서 OWASP practice board DAST 서비스 확인 완료
+-> Distributed Tracing에서 /posts HTTP 200 트레이스 확인 완료
 ```
 
 Task Definition, IAM, Secrets Manager와 ECS Service 변경은 B파트 또는 배포/인프라 담당 범위다. D파트는 Dynatrace 설치값과 Staging 검증 기준을 전달하고, 배포 후 서비스 데이터 유입, Synthetic Monitor, Problems API 수집과 Runtime finding 변환을 확인한다.
 
-2026-07-23 D파트는 `/posts`, `/login`, `/docs`에 정상 요청 15건을 발생시키고 약 3분 뒤 Dynatrace `Services`를 다시 확인했으나 서비스 목록이 표시되지 않았다. 배포 실패로 단정하지 않고, `web` 컨테이너의 `LD_PRELOAD`, OneAgent 공유 볼륨 mount, `DT_TENANTTOKEN`, `DT_CONNECTION_POINT`, OneAgent 런타임 로그와 충분한 수집 대기 시간을 순서대로 재확인한다.
+2026-07-24 revision 4 강제 재배포 후 `web` 컨테이너의 Secret 매핑, 아키텍처, OneAgent 공유 볼륨, Uvicorn 프로세스 주입과 Dynatrace endpoint 통신을 확인했다. Python 전역 모니터링과 FastAPI 계측을 활성화한 뒤 `OWASP practice board DAST` 서비스와 `/posts` 트레이스가 생성된 것도 확인했다. 이후 자동 검증에서는 Dynatrace `Services` UI 대신 `fetch-dynatrace-problems.py`의 `serviceCoverage`를 사용한다.
 
 ECS OneAgent용 Secret과 GitHub Actions용 Secret은 목적이 다르다.
 
 | Secret | 목적 |
 | --- | --- |
 | AWS Secrets Manager `secure-gate/dynatrace/fargate` | Fargate OneAgent Code Module 설치와 Dynatrace 통신 |
-| GitHub Secret `DYNATRACE_TOKEN` | `fetch-dynatrace-problems.py`의 Problems API 조회 |
+| GitHub Secret `DYNATRACE_TOKEN` | `fetch-dynatrace-problems.py`의 Problems와 Service entities 조회 |
 
-PaaS Token은 `InstallerDownload` 범위가 필요하고, `DYNATRACE_TOKEN`은 `problems.read`만 사용한다. 두 토큰을 서로 대체하거나 코드에 저장하지 않는다.
+PaaS Token은 `InstallerDownload` 범위가 필요하고, `DYNATRACE_TOKEN`은 `problems.read`와 `entities.read`를 사용한다. 두 토큰을 서로 대체하거나 코드에 저장하지 않는다.
 
 ### 2. Synthetic HTTP Monitor 생성
 
@@ -192,15 +205,16 @@ HTTP Monitor 생성은 현재 API가 아니라 UI에서 수행한다. Monitor가
 
 2026-07-23 실행 확인 결과는 `Last status: Success`, Availability `100%`, HTTP `200`이며 확인 시점 응답 시간은 `153 ms`였다.
 
-### 3. Problems API 토큰
+### 3. Problems/Entities API 토큰
 
-새 API 토큰은 `problems.read` 권한만 부여한다. 토큰을 파일, 명령줄 인자, Git 저장소에 넣지 않는다. 이전에 채팅이나 터미널 출력으로 노출한 토큰은 폐기하고 새 토큰으로 교체한다.
+새 API 토큰은 읽기 전용 `problems.read`, `entities.read` 권한만 부여한다. 토큰을 파일, 명령줄 인자, Git 저장소에 넣지 않는다. 이전에 채팅이나 터미널 출력으로 노출한 토큰은 폐기하고 새 토큰으로 교체한다.
 
 로컬 macOS zsh에서 토큰을 화면에 표시하지 않고 입력하는 예:
 
 ```zsh
 export DYNATRACE_ENV_URL=https://xlj20734.live.dynatrace.com
-export DYNATRACE_PROBLEM_SELECTOR='status("open"),entityTags("environment:staging")'
+export DYNATRACE_PROBLEM_SELECTOR='status("open")'
+export DYNATRACE_SERVICE_ENTITY_SELECTOR='type("SERVICE")'
 read -s "DYNATRACE_API_TOKEN?Dynatrace API token: "
 echo
 export DYNATRACE_API_TOKEN
@@ -241,7 +255,7 @@ python3 -m json.tool security/reports/runtime-report.json
 unset DYNATRACE_API_TOKEN
 ```
 
-`problems: []`는 수집 실패가 아니라 조회 시간 범위 안에 selector와 일치하는 열린 문제가 없다는 뜻이다. 기본 조회 범위는 최근 30분이며 `DYNATRACE_FROM=now-2h`처럼 변경할 수 있다.
+`problems: []`는 수집 실패가 아니라 조회 시간 범위 안에 selector와 일치하는 열린 문제가 없다는 뜻이다. `serviceCoverage.status`가 `detected`이면 같은 범위에서 서비스 엔티티가 확인된 것이고, `not_detected`이면 OneAgent 통신 성공 여부와 별개로 APM 서비스가 생성되지 않은 상태다. 기본 조회 범위는 최근 30분이며 `DYNATRACE_FROM=now-2h`처럼 변경할 수 있다.
 
 ### 5. GitHub Actions 전달값
 
@@ -250,8 +264,9 @@ D파트는 Workflow YAML을 수정하지 않고 A파트에 다음 값과 실행 
 | GitHub 설정 | 값 |
 | --- | --- |
 | Repository Variable `DYNATRACE_ENV_URL` | `https://xlj20734.live.dynatrace.com` |
-| Repository Variable `DYNATRACE_PROBLEM_SELECTOR` | `status("open"),entityTags("environment:staging")` |
-| Repository Secret `DYNATRACE_TOKEN` | `problems.read` 토큰 |
+| Repository Variable `DYNATRACE_PROBLEM_SELECTOR` | `status("open")` |
+| Repository Variable `DYNATRACE_SERVICE_ENTITY_SELECTOR` | `type("SERVICE")` |
+| Repository Secret `DYNATRACE_TOKEN` | `problems.read`, `entities.read` 읽기 전용 토큰 |
 
 현재 reusable workflow의 Secret 이름은 `DYNATRACE_TOKEN`이고 Python 스크립트가 읽는 환경변수 이름은 `DYNATRACE_API_TOKEN`이다. A파트는 수집 step에서 Secret을 다음처럼 환경변수로 매핑해야 한다.
 
@@ -263,12 +278,12 @@ Staging 배포 후 자동화 순서:
 
 ```text
 main Merge
--> OneAgent 적용 후에는 ECS Service가 secure-gate-dast:2 이상을 사용하도록 배포
+-> OneAgent 적용 후에는 현재 검증된 ECS Service secure-gate-dast:4를 배포
 -> ALB Target healthy 확인
 -> GET /posts Health Check
 -> ZAP Full Scan 실행
 -> Nuclei 광범위 스캔 실행
--> fetch-dynatrace-problems.py 실행
+-> fetch-dynatrace-problems.py로 Problems와 Service entities 수집
 -> runtime-validation.py 실행
 -> runtime-report.json과 원본 결과 Artifact 업로드
 ```
@@ -283,7 +298,7 @@ main Merge
 -> ALB Target healthy 및 GET /posts 200 확인
 -> ZAP Full Scan
 -> Nuclei 광범위 스캔
--> Dynatrace Problems 수집
+-> Dynatrace Problems와 Service entities 수집
 -> Runtime Validation 통합
 -> Artifact 업로드
 -> Policy Evaluator 결과에 따라 다음 환경 승격 차단 또는 배포 실패 처리
