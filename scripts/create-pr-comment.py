@@ -100,6 +100,82 @@ def build_guide_section(decision: dict) -> str:
     )
 
 
+def build_banner(decision: dict) -> str:
+    """CVE 트랙 상태 배너를 '한 곳에서' 결정한다.
+
+    조용한 fail-open이 가장 위험하므로, 최종 판단 바로 아래에 blockquote로
+    눈에 띄게 렌더한다. 우선순위: bypass > 트랙 실패(monitor/fail-closed/
+    fail-open) > monitor 정상. 향후 suppression 배너는 여기에 추가한다.
+    """
+    cve = decision.get("cve_track") or {}
+    supp = decision.get("suppression") or {}
+    mode = cve.get("mode")
+    source = cve.get("source")
+    parts = []
+
+    if supp.get("active"):
+        parts.append(
+            "> 🟠 **CVE 트랙 우회(bypass) 적용됨**  \n"
+            f"> actor: `{supp.get('actor', 'unknown')}` · 유형: `{supp.get('type')}`  \n"
+            "> 이 PR은 **CVE 검증 없이** 통과되었습니다. "
+            "**우회 사유를 PR 코멘트로 남겨 주세요.**"
+        )
+
+    if source == "failed":
+        ft = cve.get("failure_type") or "unknown"
+        if mode == "monitor":
+            parts.append(
+                "> 🔵 **CVE 트랙 실패 (monitor 모드 — 차단 안 함)**  \n"
+                f"> 유형: `{ft}` · 결과는 기록만 됩니다. "
+                "앞단(SBOM→OSV→CVE) 실행 여부를 확인하세요."
+            )
+        elif cve.get("would_block"):
+            parts.append(
+                "> 🔴 **CVE 검증 실패로 Merge가 차단되었습니다 (fail-closed)**  \n"
+                f"> 유형: `{ft}` · 앞단 실행/스크립트 상태를 확인하세요."
+            )
+        else:
+            parts.append(
+                "> 🟡 **CVE 검증이 수행되지 않았습니다 (fail-open)**  \n"
+                f"> 유형: `{ft}` · 이 PR은 **CVE 트랙 없이** 판정되었습니다. "
+                "앞단 실행 여부를 확인하세요."
+            )
+    elif mode == "monitor" and source in ("file", "executed"):
+        parts.append(
+            "> 🔵 **CVE 트랙 monitor 모드**  \n"
+            f"> 차단 후보 {cve.get('block', 0)}건 / 경고 {cve.get('warn', 0)}건 "
+            "— 결과 기록만, Merge 차단 없음."
+        )
+
+    return ("\n\n".join(parts) + "\n") if parts else ""
+
+
+def build_adjustment_section(decision: dict) -> str:
+    """CVE 보정(승격/강등) 내역을 '무엇을 왜'로 표시. 강등은 반드시 명시된다.
+
+    annotateOnly / monitor 로 판정 미반영인 항목은 '표시만'으로 구분한다.
+    """
+    adjustments = decision.get("cve_adjustments") or []
+    if not adjustments:
+        return ""
+
+    label = {"promote": "🔺 승격", "demote": "🔻 강등"}
+    rows = []
+    for a in adjustments:
+        applied = "반영" if a.get("applied") else "표시만"
+        rows.append(
+            f"| {a.get('cve')} | `{a.get('purl') or '-'}` | {label.get(a.get('action'), a.get('action'))} "
+            f"| {a.get('from')} → {a.get('to')} | {applied} | {a.get('reason')} |"
+        )
+
+    return (
+        "\n### CVE 보정 내역\n\n"
+        "| CVE | 패키지 | 조치 | 변화 | 반영 | 근거 |\n"
+        "| --- | --- | --- | --- | --- | --- |\n"
+        + "\n".join(rows) + "\n"
+    )
+
+
 def build_comment(decision: dict | None) -> str:
     if decision is None:
         return (
@@ -132,17 +208,22 @@ def build_comment(decision: dict | None) -> str:
         warning_section = f"\n### 경고\n\n{items}\n"
 
     guide_section = build_guide_section(decision)
+    adjustment_section = build_adjustment_section(decision)
+    banner = build_banner(decision)
+    banner_section = f"\n{banner}\n" if banner else ""
 
     return (
         f"## Secure PR Gate 결과\n\n"
         f"### 최종 판단\n\n"
         f"**Gate Status: {status_icon} {gate_status}**\n\n"
+        f"{banner_section}"
         f"### 검사 요약\n\n"
         f"| 영역 | 결과 | 요약 |\n"
         f"| --- | --- | --- |\n"
         f"{rows}\n"
         f"{block_section}"
         f"{warning_section}"
+        f"{adjustment_section}"
         f"{guide_section}"
         f"\n---\n*Secure PR Gate by A-Part Pipeline*"
     )
