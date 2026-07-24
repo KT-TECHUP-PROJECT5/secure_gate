@@ -76,9 +76,9 @@ D파트는 실행 중인 테스트/Staging 환경을 대상으로 런타임 보�
 - [x] Dynatrace `Services`에서 `OWASP practice board DAST` 서비스와 `/posts` 트레이스 확인
 - [x] Dynatrace Synthetic HTTP Monitor 생성: `secure-gate-staging-health`
 - [x] Synthetic Monitor 실행 결과 확인: `Success`, Availability `100%`, HTTP `200`
-- [ ] A파트의 Dynatrace Repository Variable/Secret 및 실행 step 연결 확인
-- [ ] A파트의 CD Placeholder를 ZAP/Nuclei `post-merge` 프로필과 Dynatrace 수집 순서로 교체
-- [ ] A파트 Workflow YAML 연결 여부 확인
+- [x] A파트의 Dynatrace Repository Variable/Secret 및 실행 step 연결
+- [x] A파트의 CD Placeholder를 ZAP/Nuclei `post-merge` 프로필과 Dynatrace 수집 순서로 교체
+- [x] A파트 Workflow YAML 연결
 
 ---
 

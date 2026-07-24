@@ -32,6 +32,9 @@ jobs:
       # Trivy image 분기 / Dependency-Track (선택):
       # dockerfile_path: Dockerfile
       # docker_build_context: .
-      # dependency_track_project_uuid: "00000000-0000-0000-0000-000000000000"
-      # secrets (repository): DEPENDENCY_TRACK_URL (Backend API), DEPENDENCY_TRACK_API_KEY
+      # dependency_track_service_name: backend   # 모노레포 서비스명 (비우면 레포 단위)
+      # dependency_track_project_version: main
+      # dependency_track_upload_mode: main-only  # PR에서는 skip, main push에서 업로드
+      # secrets: DEPENDENCY_TRACK_URL (Backend API), DEPENDENCY_TRACK_API_KEY
+      # 상세: docs/dependency-track.md
     secrets: inherit

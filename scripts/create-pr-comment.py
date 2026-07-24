@@ -132,16 +132,29 @@ def post_comment(token: str, repo: str, pr_number: str, body: str) -> None:
 
 
 def main():
-    token     = os.environ.get("GITHUB_TOKEN")
-    pr_number = os.environ.get("PR_NUMBER")
-    repo      = os.environ.get("REPO")
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    pr_number = os.environ.get("PR_NUMBER", "").strip()
+    repo = os.environ.get("REPO", "").strip()
 
-    if not all([token, pr_number, repo]):
-        print("[ERROR] Missing environment variables: GITHUB_TOKEN, PR_NUMBER, REPO")
+    # push / workflow_dispatch 등 PR이 아닌 이벤트에서는 댓글 대상이 없다.
+    if not pr_number:
+        print("[WARN] PR_NUMBER is empty — skipping PR comment (non-PR event).")
+        return
+
+    missing = [
+        name
+        for name, value in (
+            ("GITHUB_TOKEN", token),
+            ("REPO", repo),
+        )
+        if not value
+    ]
+    if missing:
+        print(f"[ERROR] Missing environment variables: {', '.join(missing)}")
         sys.exit(1)
 
     decision = load_decision()
-    body     = build_comment(decision)
+    body = build_comment(decision)
 
     post_comment(token, repo, pr_number, body)
 

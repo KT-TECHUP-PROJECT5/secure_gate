@@ -70,11 +70,21 @@ on:
         type: string
         required: false
         default: "."
-      dependency_track_project_uuid:
-        description: Existing Dependency-Track project UUID for CycloneDX BOM upload (no autoCreate)
+      dependency_track_service_name:
+        description: Monorepo deployable unit (e.g. frontend/backend). Empty = whole-repo DT project
         type: string
         required: false
         default: ""
+      dependency_track_project_version:
+        description: Dependency-Track project version (default main; DT is managed on main)
+        type: string
+        required: false
+        default: "main"
+      dependency_track_upload_mode:
+        description: When to upload SBOM to DT (main-only | always | never)
+        type: string
+        required: false
+        default: "main-only"
     secrets:
       DYNATRACE_TOKEN:
         description: Optional Dynatrace API token for runtime observability (extension)
@@ -361,10 +371,16 @@ jobs:
         env:
           DEPENDENCY_TRACK_URL: ${{ secrets.DEPENDENCY_TRACK_URL }}
           DEPENDENCY_TRACK_API_KEY: ${{ secrets.DEPENDENCY_TRACK_API_KEY }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: |
           python3 .secure-gate/scripts/upload-sbom-to-dependency-track.py \
             --sbom security/reports/sbom.cdx.json \
-            --project-uuid "${{ inputs.dependency_track_project_uuid }}" \
+            --repository "${{ github.repository }}" \
+            --service-name "${{ inputs.dependency_track_service_name }}" \
+            --project-version "${{ inputs.dependency_track_project_version }}" \
+            --upload-mode "${{ inputs.dependency_track_upload_mode }}" \
             --report security/reports/dependency-track-upload-report.json
 
       - name: Ensure Dependency-Track upload report
@@ -374,7 +390,7 @@ jobs:
           REPORT="security/reports/dependency-track-upload-report.json"
           mkdir -p security/reports
           if [ ! -f "$REPORT" ]; then
-            python3 -c 'import json,pathlib; p=pathlib.Path("security/reports/dependency-track-upload-report.json"); p.write_text(json.dumps({"status":"failed","project_uuid":"","reason":"report-missing"}, indent=2)+"\n")'
+            python3 -c 'import json,pathlib; p=pathlib.Path("security/reports/dependency-track-upload-report.json"); p.write_text(json.dumps({"status":"failed","reason":"report-missing","project_name":"","project_version":"","project_uuid":"","parent_name":"","service_name":"","upload_mode":"","created":False,"tool":"dependency-track","target":"bom-upload"}, indent=2)+"\n")'
           fi
 
       - name: Snapshot dependency-scan history
@@ -408,9 +424,17 @@ jobs:
   runtime-validation:
     name: Runtime Validation
     runs-on: ubuntu-latest
+    needs: dependency-scan
     steps:
       - name: Checkout caller repository
         uses: actions/checkout@v4
+
+      - name: Checkout Secure Gate tooling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.gate_repository }}
+          ref: ${{ inputs.gate_ref }}
+          path: .secure-gate
 
       - name: Set up Node.js
         if: inputs.install_command != '' || inputs.build_command != '' || inputs.start_command != ''
@@ -455,57 +479,55 @@ jobs:
             echo "url=" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Run DAST (OWASP ZAP baseline)
+      - name: Verify runtime target health
         if: inputs.enable_dast && steps.dast-target.outputs.url != ''
-        continue-on-error: true
         run: |
           set -euo pipefail
-          mkdir -p security/reports
           TARGET_URL="${{ steps.dast-target.outputs.url }}"
-          echo "Running ZAP baseline against ${TARGET_URL}"
-          docker run --rm --network host \
-            -v "${{ github.workspace }}/security/reports:/zap/wrk:rw" \
-            ghcr.io/zaproxy/zaproxy:stable \
-            zap-baseline.py -t "${TARGET_URL}" -J zap-report.json -I || true
-          if [ -f security/reports/zap-report.json ]; then
-            echo "ZAP report written"
-          else
-            echo '{"site":[],"note":"zap report missing"}' > security/reports/zap-report.json
-          fi
+          HEALTH_URL="${TARGET_URL%/}${{ inputs.health_path }}"
+          for i in $(seq 1 30); do
+            if curl --fail --silent --show-error "$HEALTH_URL" >/dev/null; then
+              echo "Runtime target is healthy: ${HEALTH_URL}"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Runtime target did not become healthy: ${HEALTH_URL}" >&2
+          exit 1
 
-      - name: Write runtime report
-        if: always()
+      - name: Download dependency report for Nuclei
+        if: inputs.enable_dast && steps.dast-target.outputs.url != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: dependency-report
+          path: security/reports
+
+      - name: Run ZAP PR validation
+        if: inputs.enable_dast && steps.dast-target.outputs.url != ''
         run: |
-          mkdir -p security/reports
-          ENABLE_DAST="${{ inputs.enable_dast }}"
-          TARGET_URL="${{ steps.dast-target.outputs.url }}"
-          if [ "$ENABLE_DAST" = "true" ] && [ -n "$TARGET_URL" ]; then
-            cat > security/reports/runtime-report.json <<EOF
-          {
-            "status": "passed",
-            "tool": "runtime-validation",
-            "findings": [],
-            "meta": {
-              "enable_dast": true,
-              "target_url": "${TARGET_URL}",
-              "mode": "runner-local-or-external",
-              "dynatrace": "optional-extension-not-run"
-            }
-          }
-          EOF
-          else
-            cat > security/reports/runtime-report.json <<'EOF'
-          {
-            "status": "passed",
-            "tool": "runtime-validation",
-            "findings": [],
-            "meta": {
-              "enable_dast": false,
-              "note": "Placeholder or DAST disabled — provide start_command/target_url and enable_dast=true"
-            }
-          }
-          EOF
-          fi
+          python3 .secure-gate/scripts/run-zap-validation.py \
+            --profile pr \
+            --target-url "${{ steps.dast-target.outputs.url }}" \
+            --reports-dir security/reports
+
+      - name: Run Nuclei PR validation
+        if: inputs.enable_dast && steps.dast-target.outputs.url != ''
+        run: |
+          python3 .secure-gate/scripts/run-nuclei-validation.py \
+            --profile pr \
+            --target-url "${{ steps.dast-target.outputs.url }}" \
+            --trivy-report security/reports/dependency-report.json \
+            --reports-dir security/reports
+
+      - name: Generate runtime validation report
+        if: always()
+        env:
+          RUNTIME_REQUIRED_REPORTS: ${{ inputs.enable_dast && 'zap,nuclei,nuclei-coverage' || 'none' }}
+        run: |
+          python3 .secure-gate/scripts/runtime-validation.py \
+            --base-url "${{ steps.dast-target.outputs.url }}" \
+            --health-path "${{ inputs.health_path }}" \
+            --output security/reports/runtime-report.json
 
       - name: Stop application
         if: always() && inputs.start_command != ''
@@ -521,12 +543,17 @@ jobs:
           name: runtime-report
           path: security/reports/runtime-report.json
 
-      - name: Upload ZAP report
+      - name: Upload runtime scanner reports
         if: always() && inputs.enable_dast
         uses: actions/upload-artifact@v4
         with:
-          name: zap-report
-          path: security/reports/zap-report.json
+          name: runtime-scanner-reports
+          path: |
+            security/reports/zap-report.json
+            security/reports/nuclei-report.jsonl
+            security/reports/nuclei-cve-coverage.json
+            security/reports/nuclei-cve-ids.txt
+            security/reports/nuclei-cve-matched-templates.txt
           if-no-files-found: ignore
 
   # ──────────────────────────────────────────
@@ -604,7 +631,8 @@ jobs:
     name: PR Comment
     runs-on: ubuntu-latest
     needs: aggregate-and-gate
-    if: always()
+    # PR이 아니면 댓글 대상이 없으므로 skip (push 스모크 등)
+    if: always() && github.event_name == 'pull_request'
     steps:
       - name: Checkout caller repository
         uses: actions/checkout@v4

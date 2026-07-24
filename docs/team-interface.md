@@ -119,7 +119,7 @@ steps:
 | Trivy SBOM 명령어          | `trivy {fs\|image} --format cyclonedx ...` (`fs`는 CVE와 동일하게 `--file-patterns "pip:requirements-legacy.txt"` 포함) | 확정 |
 | Dependency Scan 결과 파일 경로 | `security/reports/dependency-report.json` | A파트 고정 |
 | SBOM 형식 / 경로           | CycloneDX **1.6** → `security/reports/sbom.cdx.json` (`bomFormat == "CycloneDX"`, `specVersion == "1.6"` 검증, 실패 시 Job 실패) | 확정 |
-| Dependency-Track           | 기존 프로젝트 UUID에 BOM 업로드 (선택). URL+API Key+UUID 모두 있을 때만. `autoCreate` 없음. DT는 Gate가 아니라 SBOM/SCA 대시보드. `succeeded`=BOM 수신 성공(분석 완료 아님) | 확정 |
+| Dependency-Track           | GitHub repo/service 이름으로 Project 식별·자동 생성. 기본 **main만** 업로드. UUID input 없음. DT는 Gate가 아니라 SBOM/SCA 대시보드. 상세: `docs/dependency-track.md` | 확정 |
 | DT 업로드 리포트           | `security/reports/dependency-track-upload-report.json` (artifact `dependency-track-upload-report`) | 확정 |
 | 각 도구의 실패 기준        | 결과 파일 미생성 또는 유효하지 않은 JSON. DT API 실패는 Job 비차단 | 초기 확정 |
 | 출력 형식                  | 도구별 원본 JSON                         | 확정       |
@@ -131,29 +131,29 @@ steps:
 
 | 항목                              | 내용                                   | 상태       |
 | --------------------------------- | -------------------------------------- | ---------- |
-| PR 단계 실행 방식                 | GitHub Actions Runner 내부에서 B파트 앱을 임시 실행. PostgreSQL은 `web/docker-compose.yml`, FastAPI는 `uvicorn` 사용 | D파트 전달 완료 / A파트 연결 필요 |
+| PR 단계 실행 방식                 | GitHub Actions Runner 내부에서 B파트 앱을 임시 실행. PostgreSQL은 `web/docker-compose.yml`, FastAPI는 `uvicorn` 사용 | A·D파트 Workflow 연결 완료 |
 | PR 단계 Runtime URL               | 고정 URL이 없으면 `RUNTIME_BASE_URL=http://127.0.0.1:8000` 사용 | D파트 전달 완료 |
-| 외부 Staging URL                  | `STAGING_URL=http://www.securegate.n-e.kr` | 확정 / A파트 Variable 연결 필요 |
+| 외부 Staging URL                  | `STAGING_URL=http://www.securegate.n-e.kr` | 확정 / Repository Variable 사용 |
 | Staging 실행 환경                 | ECS Cluster/Service `secure-gate-dast`, Launch Type `FARGATE`, 현재 `secure-gate-dast:4`, container `web:8000` | Revision 4 배포 완료 / ALB healthy |
 | Health Check Endpoint             | `HEALTH_CHECK_PATH=/posts`, 기대 상태 코드 `200` | D파트 기준 확정 |
 | Smoke Test 실행 경로              | `SMOKE_TEST_PATHS="/login=200,/posts=200,/upload=200\|303,/docs=200,/redoc=200"` | D파트 기준 확정 |
-| PR ZAP 실행 명령어                | `python3 scripts/run-zap-validation.py --profile pr --target-url http://127.0.0.1:8000/posts` 실행 후 `security/reports/zap-report.json` 저장 | D파트 실행기 구현 완료 / A파트 연결 필요 |
-| PR Nuclei 실행 명령어             | `python3 scripts/run-nuclei-validation.py --profile pr --target-url http://127.0.0.1:8000/posts --trivy-report security/reports/dependency-report.json`. 기본값은 `medium,high,critical`, `xss`, 전체 timeout 5분 | D파트 실행기 구현 완료 / A파트 연결 필요 |
-| Merge 이후 ZAP Full Scan          | ECS 배포와 Health Check 뒤 `run-zap-validation.py --profile post-merge`; Spider 5분, Ajax Spider, 전체 timeout 30분 | D파트 실행기 구현 완료 / A파트 CD 연결 필요 |
-| Merge 이후 Nuclei 광범위 스캔     | `run-nuclei-validation.py --profile post-merge`로 태그 제한 없이 `low,medium,high,critical`, `rate-limit=20`, `c=10`, 전체 timeout 30분 실행 | D파트 구현 완료 / A파트 CD 연결 필요 |
-| Trivy CVE 기반 Nuclei 우선 검사   | `scripts/run-nuclei-validation.py`가 C파트 `dependency-report` Artifact의 High/Critical CVE 추출, `nuclei -tl` 사전 확인, 조건부 CVE 검사와 기본 결과 통합을 수행 | D파트 구현·검증 완료 / A파트 Artifact 다운로드 연결 필요 |
+| PR ZAP 실행 명령어                | `python3 scripts/run-zap-validation.py --profile pr --target-url http://127.0.0.1:8000/posts` 실행 후 `security/reports/zap-report.json` 저장 | Workflow 연결 완료 |
+| PR Nuclei 실행 명령어             | `python3 scripts/run-nuclei-validation.py --profile pr --target-url http://127.0.0.1:8000/posts --trivy-report security/reports/dependency-report.json`. 기본값은 `medium,high,critical`, `xss`, 전체 timeout 5분 | Workflow 연결 완료 |
+| Merge 이후 ZAP Full Scan          | ECS 배포와 Health Check 뒤 `run-zap-validation.py --profile post-merge`; Spider 5분, Ajax Spider, 전체 timeout 30분 | CD Workflow 연결 완료 |
+| Merge 이후 Nuclei 광범위 스캔     | `run-nuclei-validation.py --profile post-merge`로 태그 제한 없이 `low,medium,high,critical`, `rate-limit=20`, `c=10`, 전체 timeout 30분 실행 | CD Workflow 연결 완료 |
+| Trivy CVE 기반 Nuclei 우선 검사   | `scripts/run-nuclei-validation.py`가 C파트 `dependency-report` Artifact의 High/Critical CVE 추출, `nuclei -tl` 사전 확인, 조건부 CVE 검사와 기본 결과 통합을 수행 | Artifact 다운로드 연결 완료 |
 | Trivy-Nuclei 결과 해석 기준       | `Trivy 후보 CVE 수 → Nuclei 매칭 템플릿 수 → Nuclei 실제 finding 수`를 구분. 매칭 템플릿 0개는 `passed`가 아니라 `skipped`, Trivy finding은 Gate에 유지 | D파트 기준 확정 / A·E파트 반영 필요 |
 | Trivy-Nuclei 수동 검증            | Next.js 포트폴리오 기준 Trivy 22건, High 8건, CVE 후보 5개, 매칭 템플릿 1개, 실제 finding 0개 확인 | D파트 검증 완료 |
 | Staging Nuclei 검증               | `http://www.securegate.n-e.kr/posts` 기준 Trivy CVE 후보 8개, 매칭 템플릿 0개, 기본 XSS finding 2개. CVE 검사는 `skipped: no-matching-nuclei-template` | D파트 검증 완료 |
-| Nuclei CVE coverage 파일          | `security/reports/nuclei-cve-coverage.json`에 후보 수, 매칭 템플릿 수, 기본/CVE/통합 finding 수와 skip/failure 사유 기록 | D파트 구현 완료 / A파트 Artifact 포함 필요 |
+| Nuclei CVE coverage 파일          | `security/reports/nuclei-cve-coverage.json`에 후보 수, 매칭 템플릿 수, 기본/CVE/통합 finding 수와 skip/failure 사유 기록 | Runtime scanner Artifact 포함 완료 |
 | Custom Runtime Check              | `debug-exposure`, `docs-exposure`, `reflected-xss`, `search-sqli`, `admin-access`, `idor` | D파트 구현 완료 |
 | Dynatrace Environment             | `https://xlj20734.live.dynatrace.com`. revision 4 강제 재배포, Python/FastAPI 계측 활성화, `OWASP practice board DAST` 서비스와 `/posts` HTTP 200 트레이스 확인 | 배포·통신·APM 서비스 탐지 정상 |
 | Dynatrace Synthetic Monitor       | `secure-gate-staging-health`, `GET /posts`, 5분, Busan, `environment:staging` / `service:secure-gate` | 생성 완료 / Success·Availability 100%·HTTP 200 확인 |
 | Dynatrace ECS Secret              | `secure-gate/dynatrace/fargate`, Key `DT_PAAS_TOKEN`, `DT_TENANT`, `DT_TENANTTOKEN`, `DT_CONNECTION_POINT`. 실제 값과 전체 ARN은 문서에 기록하지 않음 | connectioninfo 일치·IAM 권한·revision 4 배포 완료 |
-| Dynatrace 수집                     | `scripts/fetch-dynatrace-problems.py`로 열린 문제와 최근 Service entities를 `security/reports/dynatrace-problems.json`에 저장. 서비스 0건은 High finding | D파트 구현 완료 / A파트 연결 필요 |
-| Dynatrace Secret 매핑              | Workflow의 `DYNATRACE_TOKEN`을 스크립트 환경변수 `DYNATRACE_API_TOKEN`으로 전달. 토큰 범위는 `problems.read`, `entities.read` | A파트 연결 필요 |
+| Dynatrace 수집                     | `scripts/fetch-dynatrace-problems.py`로 열린 문제와 최근 Service entities를 `security/reports/dynatrace-problems.json`에 저장. 서비스 0건은 High finding | CD Workflow 연결 완료 |
+| Dynatrace Secret 매핑              | Workflow의 `DYNATRACE_TOKEN`을 스크립트 환경변수 `DYNATRACE_API_TOKEN`으로 전달. 토큰 범위는 `problems.read`, `entities.read` | 연결 완료 |
 | Runtime Validation 결과 파일 경로 | `security/reports/runtime-report.json` | A파트 고정 |
-| Post-merge 원본 결과 필수 검증    | `RUNTIME_REQUIRED_REPORTS=zap,nuclei,nuclei-coverage,dynatrace`; 누락 또는 Nuclei 실행 실패는 High finding | D파트 구현 완료 / A파트 CD 연결 필요 |
+| Post-merge 원본 결과 필수 검증    | `RUNTIME_REQUIRED_REPORTS=zap,nuclei,nuclei-coverage,dynatrace`; 누락 또는 Nuclei 실행 실패는 High finding | CD Workflow 연결 완료 |
 | 보안 헤더 검증 기준               | CSP, X-Frame-Options, X-Content-Type-Options 등 | 초기 확정 |
 | Runtime Validation 실패 기준      | 통합 finding의 Critical/High → Policy Evaluator | 확정 방향 |
 | PR DAST vs CD DAST                | PR=ZAP Baseline와 제한된 Nuclei 검사, Staging=ZAP Full Scan와 Nuclei 광범위 검사를 순차 실행 | 확정 |

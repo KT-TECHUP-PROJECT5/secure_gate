@@ -259,7 +259,7 @@ unset DYNATRACE_API_TOKEN
 
 ### 5. GitHub Actions 전달값
 
-D파트는 Workflow YAML을 수정하지 않고 A파트에 다음 값과 실행 순서를 전달한다.
+D파트 스크립트는 다음 GitHub 설정을 사용하며 A파트 Workflow가 실행 순서와 Artifact 전달을 담당한다.
 
 | GitHub 설정 | 값 |
 | --- | --- |
@@ -268,7 +268,7 @@ D파트는 Workflow YAML을 수정하지 않고 A파트에 다음 값과 실행 
 | Repository Variable `DYNATRACE_SERVICE_ENTITY_SELECTOR` | `type("SERVICE")` |
 | Repository Secret `DYNATRACE_TOKEN` | `problems.read`, `entities.read` 읽기 전용 토큰 |
 
-현재 reusable workflow의 Secret 이름은 `DYNATRACE_TOKEN`이고 Python 스크립트가 읽는 환경변수 이름은 `DYNATRACE_API_TOKEN`이다. A파트는 수집 step에서 Secret을 다음처럼 환경변수로 매핑해야 한다.
+Workflow의 Secret 이름은 `DYNATRACE_TOKEN`이고 Python 스크립트가 읽는 환경변수 이름은 `DYNATRACE_API_TOKEN`이다. CD Workflow의 수집 step에서 다음과 같이 매핑한다.
 
 ```text
 DYNATRACE_API_TOKEN <- secrets.DYNATRACE_TOKEN
