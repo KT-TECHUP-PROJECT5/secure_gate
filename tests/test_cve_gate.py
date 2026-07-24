@@ -558,6 +558,87 @@ class MonitorBypassTests(unittest.TestCase):
         self.assertTrue(any("[monitor]" in w and "트랙 실패" in w for w in dec["warnings"]))
 
 
+class ReportPathResolutionTests(unittest.TestCase):
+    """paths.resolve_report: reusable workflow 다운로드 경로 편차를 후보 탐색으로 흡수."""
+
+    @classmethod
+    def setUpClass(cls):
+        p = REPO / "scripts" / "paths.py"
+        spec = importlib.util.spec_from_file_location("paths_mod", p)
+        cls.paths = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.paths)
+
+    def _resolve(self, tmp, **kw):
+        return self.paths.resolve_report(
+            "gate-decision.json",
+            reports_dir=str(Path(tmp) / "security" / "reports"),
+            search_root=str(tmp), log=False, **kw)
+
+    def test_finds_in_reports_dir(self):
+        """후보2: security/reports/<file>."""
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "security" / "reports" / "gate-decision.json"
+            f.parent.mkdir(parents=True); f.write_text("{}")
+            self.assertEqual(self._resolve(d).resolve(), f.resolve())
+
+    def test_finds_in_root(self):
+        """후보3: ./<file> (단일 named 아티팩트가 루트에 풀린 케이스)."""
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "gate-decision.json"; f.write_text("{}")
+            self.assertEqual(self._resolve(d).resolve(), f.resolve())
+
+    def test_finds_via_glob_subdir(self):
+        """후보4: **/<file> (download-all 이 아티팩트명 하위폴더에 푼 케이스)."""
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "gate-decision" / "gate-decision.json"
+            f.parent.mkdir(parents=True); f.write_text("{}")
+            got = self._resolve(d)
+            self.assertIsNotNone(got)
+            self.assertEqual(got.resolve(), f.resolve())
+
+    def test_priority_reports_over_root(self):
+        """우선순위: security/reports(2) 가 ./(3) 보다 먼저."""
+        with tempfile.TemporaryDirectory() as d:
+            rf = Path(d) / "security" / "reports" / "gate-decision.json"
+            rf.parent.mkdir(parents=True); rf.write_text("{}")
+            (Path(d) / "gate-decision.json").write_text("{}")
+            self.assertEqual(self._resolve(d).resolve(), rf.resolve())
+
+    def test_env_var_highest_priority(self):
+        """우선순위: env(1) 가 security/reports(2) 보다 먼저."""
+        with tempfile.TemporaryDirectory() as d:
+            envf = Path(d) / "custom-decision.json"; envf.write_text("{}")
+            rf = Path(d) / "security" / "reports" / "gate-decision.json"
+            rf.parent.mkdir(parents=True); rf.write_text("{}")
+            os.environ["TEST_GD_ENV"] = str(envf)
+            try:
+                got = self._resolve(d, env_var="TEST_GD_ENV")
+                self.assertEqual(got.resolve(), envf.resolve())
+            finally:
+                os.environ.pop("TEST_GD_ENV", None)
+
+    def test_none_when_absent(self):
+        """전부 없으면 None(호출부는 fallback)."""
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(self._resolve(d))
+
+    def test_create_pr_comment_uses_resolver(self):
+        """create-pr-comment.load_decision 가 ./gate-decision.json(루트 배치)도 로드."""
+        spec = importlib.util.spec_from_file_location("cpc_mod", PC_PATH)
+        cpc = importlib.util.module_from_spec(spec); spec.loader.exec_module(cpc)
+        cwd0 = os.getcwd()
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "gate-decision.json").write_text(
+                json.dumps({"gate_status": "PASSED", "reports": {}}))
+            os.chdir(d)
+            try:
+                dec = cpc.load_decision()
+            finally:
+                os.chdir(cwd0)
+        self.assertIsNotNone(dec)
+        self.assertEqual(dec["gate_status"], "PASSED")
+
+
 class SeverityConstantsTests(unittest.TestCase):
     """severity.py 단일 출처 + '심각도 등급'과 '표시 우선순위' 두 축 분리 검증."""
 

@@ -33,6 +33,7 @@ TOOLING_POLICIES = TOOLING_ROOT / "security" / "policies"
 TOOLING_SCRIPTS  = TOOLING_ROOT / "scripts"
 sys.path.insert(0, str(TOOLING_SCRIPTS))
 from severity import SEVERITY_RANK as SEV_RANK, CVSS_BAND_FLOOR
+from paths import resolve_report
 
 # ── 리포트 산출물: caller cwd 기준 ──
 REPORTS_DIR   = Path("security/reports")
@@ -248,7 +249,9 @@ def maybe_inject_trivy(reports: dict) -> None:
     dep = reports.get("dependency_scan") or {}
     if dep.get("findings"):
         return  # 이미 정규화됨 (mock 또는 미래 aggregator)
-    raw = _read_json_safe(DEP_REPORT_FILE, label="dependency-report.json")
+    dep_path = resolve_report(DEP_REPORT_FILE.name,
+                              env_var="SECURE_GATE_DEP_REPORT") or DEP_REPORT_FILE
+    raw = _read_json_safe(dep_path, label="dependency-report.json")
     if raw is None:
         return  # 파일 없음(정상) 또는 손상(_read_json_safe가 이미 경고) → baseline 없음
     if not isinstance(raw, dict) or "SchemaVersion" not in raw:
@@ -376,7 +379,10 @@ def load_cve_decision(policy: dict) -> dict:
     if mode == "off":
         return result
 
-    decision_file = Path(ct["decisionFile"])
+    # reusable workflow 다운로드 편차 흡수: env → security/reports → ./ → glob.
+    _decision_default = Path(ct["decisionFile"])
+    decision_file = resolve_report(_decision_default.name,
+                                   env_var="SECURE_GATE_CVE_DECISION") or _decision_default
 
     # 1) 파일 있으면 읽는다
     data = _read_json_safe(decision_file)
@@ -712,7 +718,8 @@ def apply_cve_track(decision: dict, cve_result: dict, policy: dict) -> dict:
 
 # ──────────────────────────────────────────────────────────────────
 def main():
-    summary  = load_json(SUMMARY_FILE)
+    summary  = load_json(resolve_report(SUMMARY_FILE.name,
+                                        env_var="SECURE_GATE_SUMMARY") or SUMMARY_FILE)
     policy   = load_json(resolve_policy_file())
     profile_file = resolve_profile_file()
     if profile_file is not None:

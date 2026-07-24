@@ -20,8 +20,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from severity import display_key
+from paths import resolve_report
 
-DECISION_FILE = Path("security/reports/gate-decision.json")
+# 정식 경로. reusable workflow 다운로드 편차는 resolve_report 가 흡수한다.
+DECISION_FILENAME = "gate-decision.json"
 
 TOOL_LABELS = {
     "build":              "Build / Test",
@@ -33,10 +35,13 @@ TOOL_LABELS = {
 
 
 def load_decision() -> dict:
-    if not DECISION_FILE.exists():
-        print(f"[WARN] gate-decision.json not found. Posting fallback comment.")
+    # SECURE_GATE_DECISION 최우선 → security/reports → ./ → glob 순으로 탐색.
+    # 못 찾으면 resolve_report 가 탐색 경로 목록을 stderr 에 남기고 None → fallback.
+    path = resolve_report(DECISION_FILENAME, env_var="SECURE_GATE_DECISION")
+    if path is None:
+        print("[WARN] gate-decision.json not found. Posting fallback comment.")
         return None
-    with open(DECISION_FILE) as f:
+    with open(path) as f:
         return json.load(f)
 
 
