@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}커뮤니티 · 모아{% endblock %}
+{% block content %}
+<section class="hero">
+    <div>
+        <span class="eyebrow">MOA COMMUNITY</span>
+        <h1>오늘의 이야기를<br>가볍게 나눠보세요.</h1>
+        <p>관심사와 일상, 유용한 정보를 이웃들과 함께 나누는 공간입니다.</p>
+    </div>
+    {% if user %}
+    <a class="button" href="/posts/new">새 글 작성</a>
+    {% else %}
+    <a class="button" href="/login">로그인하고 참여하기</a>
+    {% endif %}
+</section>
+
+<section class="panel board-panel">
+    <div class="section-head">
+        <div>
+            <span class="section-kicker">BOARD</span>
+            <h2>최근 게시글</h2>
+        </div>
+        <form method="get" action="/posts" class="search-form">
+            <input type="search" name="keyword" value="{{ keyword or '' }}" placeholder="게시글 검색" aria-label="게시글 검색">
+            <button class="search-button" type="submit">검색</button>
+        </form>
+    </div>
+    {% if keyword %}
+    <!-- LAB: 검색어 Reflected XSS 확인을 위해 escape를 비활성화한 출력 지점 -->
+    <p class="search-result"><strong>{{ keyword | safe }}</strong> 검색 결과</p>
+    {% endif %}
+    <div class="post-list">
+        {% for post in posts %}
+        <a class="post-row" href="{% if post.is_private %}/posts/private/{{ post.id }}{% else %}/posts/{{ post.id }}{% endif %}">
+            <span class="post-number">{{ post.id }}</span>
+            <span class="post-main">
+                <strong>{{ post.title }}</strong>
+                <small>{{ post.author }} · {{ post.created_at.strftime('%Y.%m.%d %H:%M') }}</small>
+            </span>
+            <span class="row-arrow">→</span>
+        </a>
+        {% else %}
+        <div class="empty-state">
+            <strong>아직 게시글이 없습니다.</strong>
+            <p>첫 번째 이야기를 남겨보세요.</p>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

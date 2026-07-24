@@ -71,7 +71,7 @@ flowchart TD
 | --- | --- |
 | PR 자동 트리거 | PR 생성 또는 업데이트 시 GitHub Actions 자동 실행 |
 | SAST | Semgrep 기반 코드 취약점 정적 분석 (CodeQL 비교 후 기본 도구로 선정) |
-| Secret Scan | Gitleaks 기반 API Key, JWT Secret, DB Password 등 민감정보 탐지 |
+| Secret Scan | Semgrep `p/secrets` 기반 API Key, JWT Secret, DB Password 등 민감정보 탐지 |
 | Dependency Scan | Trivy 기반 의존성 및 CVE 검사 |
 | SBOM | CycloneDX 구성품·버전·의존 관계 목록 (Trivy 생성) |
 | DAST | OWASP ZAP + Nuclei 기반 실행 중인 웹 애플리케이션 동적 분석 |
@@ -136,7 +136,7 @@ Gate Status: ❌ FAILED
 | CI/CD | GitHub Actions (Reusable Workflow) |
 | Container | Docker |
 | SAST | Semgrep |
-| Secret Scan | Gitleaks |
+| Secret Scan | Semgrep Community (`p/secrets`) |
 | Dependency Scan | Trivy |
 | SBOM | CycloneDX |
 | DAST | OWASP ZAP, Nuclei |
@@ -224,7 +224,7 @@ uses: KT-TECHUP-PROJECT5/secure_gate/.github/workflows/pr-security-gate.yml@v1
 | --- | --- |
 | A. Platform / Pipeline | GitHub Actions 파이프라인 구조, Aggregator, Gate Evaluator, PR 댓글 자동화, CD Workflow |
 | B. Application Security / Red Team | 취약점 포함 테스트 앱 구성, 공격 PoC 작성 및 검증 |
-| C. Security Scan | Semgrep, Gitleaks, Trivy, SBOM(CycloneDX) 셋업 및 튜닝 |
+| C. Security Scan | Semgrep(SAST·Secret Scan), Trivy, SBOM(CycloneDX) 셋업 및 튜닝 |
 | D. Runtime Validation | ZAP·Nuclei DAST, 보안 헤더 검증, Health Check, Smoke Test, Staging 배포 후 검증 |
 | E. AppSec / Policy / IR | OWASP/CVSS 기반 정책 룰, IR 플레이북, PR 수정 가이드 |
 
