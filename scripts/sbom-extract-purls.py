@@ -5,20 +5,21 @@ sbom-extract-purls.py
 CycloneDX SBOM을 읽어 각 컴포넌트의 purl(package URL)을 추출한다.
 이번 단계는 OSV/EPSS/KEV 조회 없이 "SBOM -> purl 목록" 변환까지만 검증한다.
 
-지금은 security/sbom/mock-sbom.json(mock)을 읽지만, 나중에 실제 SBOM
-(syft/trivy가 생성한 CycloneDX 파일)으로 SBOM_FILE 경로만 바꿔 끼우면
-extract_components() 이하 로직은 그대로 재사용 가능하도록 구성했다.
+SBOM 소스는 C파트가 산출하는 정식 CycloneDX 계약 파일
+(security/reports/sbom.cdx.json, specVersion 1.6, caller cwd)이다.
+extract_components() 이하 로직은 mock/실제 SBOM 모두에서 동일하게 동작한다.
 
 CycloneDX는 components 하위에 transitive dependency를 다시
 components 배열로 중첩시키는 경우가 있어, extract_components()는
-재귀적으로 순회한다.
+재귀적으로 순회한다. Trivy SBOM은 앱/OS 그룹 노드에 purl이 없을 수 있고,
+그런 노드는 [WARN]로 건너뛴다(정상 동작).
 """
 
 import json
 import sys
 from pathlib import Path
 
-SBOM_FILE = Path("security/sbom/mock-sbom.json")
+SBOM_FILE = Path("security/reports/sbom.cdx.json")
 
 
 def load_sbom(path: Path) -> dict:
