@@ -1,8 +1,8 @@
 ---
 문서명: 파이프라인 운영 가이드
-최신화: 2026-07-23
+최신화: 2026-07-24
 작성자: 이윤재
-Version: 1.3.0
+Version: 1.5.0
 ---
 
 # Pipeline Guide
@@ -363,10 +363,11 @@ security/reports/
 | `scripts/aggregate-results.py` | 각 보안 결과 파일 통합 |
 | `scripts/evaluate-gate.py` | 정책 기준 Pass/Fail 판단 |
 | `scripts/create-pr-comment.py` | GitHub API로 PR 댓글 작성 |
-| `scripts/runtime-validation.py` | Health / Smoke / Header / Custom Check / ZAP / Nuclei / Dynatrace 결과를 `runtime-report.json`으로 생성 |
+| `scripts/runtime-validation.py` | Health / Smoke / Header / Custom Check / ZAP / Nuclei / Dynatrace 결과를 `runtime-report.json`으로 생성하고, Post-merge 필수 원본 결과 누락을 검증 |
 | `scripts/fetch-dynatrace-problems.py` | Dynatrace Problems API v2의 열린 문제와 최근 Service entities를 JSON으로 수집 |
+| `scripts/run-zap-validation.py` | PR ZAP Baseline과 Post-merge ZAP Full Scan 실행, 종료 코드와 JSON 생성 여부 검증 |
 | `scripts/trivy-to-nuclei.py` | Trivy 원본 JSON의 High/Critical CVE를 Nuclei template ID 입력 파일로 변환 |
-| `scripts/run-nuclei-validation.py` | Nuclei 기본 검사, Trivy CVE 조건부 검사, JSONL 통합과 coverage 결과 생성 |
+| `scripts/run-nuclei-validation.py` | PR 제한 프로필 또는 Post-merge 광범위 프로필 실행, Trivy CVE 조건부 검사, JSONL 통합과 coverage 결과 생성 |
 | `scripts/upload-sbom-to-dependency-track.py` | CycloneDX SBOM을 기존 DT 프로젝트 UUID에 업로드 |
 | `scripts/pin-cyclonedx-specversion.py` | CycloneDX `specVersion`을 1.6으로 고정 (DT 호환) |
 | `scripts/snapshot-dependency-scan-history.py` | dependency-scan latest → `history/<run_id>/` 스냅샷 |

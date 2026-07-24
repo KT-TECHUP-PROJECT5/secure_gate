@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Run the D-part Nuclei baseline scan and optional Trivy CVE-targeted scan.
+Run the D-part Nuclei scan and optional Trivy CVE-targeted scan.
 
 The script keeps pipeline orchestration thin:
 1. Convert Trivy High/Critical CVEs to Nuclei template IDs.
-2. Run the bounded PR baseline profile.
+2. Run either the bounded PR profile or the broad post-merge profile.
 3. List matching installed templates before starting the targeted scan.
 4. Skip the targeted scan when no template matches.
 5. Merge both JSONL reports and write coverage metadata.
@@ -27,6 +27,38 @@ DEFAULT_NUCLEI_IMAGE = "projectdiscovery/nuclei:latest"
 DEFAULT_TEMPLATE_VOLUME = "secure-gate-nuclei-templates"
 DISABLED_VALUES = {"", "none", "off", "false", "disable", "disabled"}
 ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+PROFILE_DEFAULTS = {
+    "pr": {
+        "docker_network": "host",
+        "severities": "medium,high,critical",
+        "tags": "xss",
+        "rate_limit": 10,
+        "concurrency": 5,
+        "bulk_size": 0,
+        "retries": 0,
+        "request_timeout": 5,
+        "scan_timeout": 5 * 60,
+        "template_list_timeout": 2 * 60,
+        "enable_interactsh": False,
+        "show_stats": False,
+        "require_trivy_report": True,
+    },
+    "post-merge": {
+        "docker_network": "none",
+        "severities": "low,medium,high,critical",
+        "tags": "none",
+        "rate_limit": 20,
+        "concurrency": 10,
+        "bulk_size": 10,
+        "retries": 1,
+        "request_timeout": 10,
+        "scan_timeout": 30 * 60,
+        "template_list_timeout": 5 * 60,
+        "enable_interactsh": True,
+        "show_stats": True,
+        "require_trivy_report": False,
+    },
+}
 
 
 class NucleiExecutionError(RuntimeError):
@@ -56,6 +88,33 @@ def parse_duration(raw_value):
 
 def is_disabled(value):
     return str(value).strip().lower() in DISABLED_VALUES
+
+
+def parse_optional_bool(raw_value, setting_name):
+    if raw_value is None:
+        return None
+
+    value = str(raw_value).strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{setting_name} must be true or false")
+
+
+def environment_bool(parser, setting_name):
+    try:
+        return parse_optional_bool(os.environ.get(setting_name), setting_name)
+    except ValueError as error:
+        parser.error(str(error))
+
+
+def apply_profile_defaults(args):
+    defaults = PROFILE_DEFAULTS[args.profile]
+    for setting_name, default_value in defaults.items():
+        if getattr(args, setting_name) is None:
+            setattr(args, setting_name, default_value)
+    return args
 
 
 def validate_target_url(target_url):
@@ -253,8 +312,12 @@ def add_common_scan_arguments(arguments, args):
             str(args.request_timeout),
         ]
     )
+    if args.bulk_size > 0:
+        arguments.extend(["-bulk-size", str(args.bulk_size)])
     if not args.enable_interactsh:
         arguments.append("-ni")
+    if args.show_stats:
+        arguments.extend(["-stats", "-stats-interval", "30"])
 
 
 def build_baseline_arguments(args):
@@ -308,7 +371,13 @@ def parse_args():
     )
 
     parser = argparse.ArgumentParser(
-        description="Run bounded baseline and Trivy CVE-targeted Nuclei scans."
+        description="Run PR or post-merge Nuclei scans with optional Trivy CVE targeting."
+    )
+    parser.add_argument(
+        "--profile",
+        choices=sorted(PROFILE_DEFAULTS),
+        default=env_or_default("NUCLEI_SCAN_PROFILE", "pr"),
+        help="Scan profile: bounded PR scan or broad post-merge scan.",
     )
     parser.add_argument("--target-url", default=default_target)
     parser.add_argument(
@@ -332,7 +401,7 @@ def parse_args():
     )
     parser.add_argument(
         "--docker-network",
-        default=env_or_default("NUCLEI_DOCKER_NETWORK", "host"),
+        default=os.environ.get("NUCLEI_DOCKER_NETWORK"),
         help="Docker network name. Use 'none' to omit --network.",
     )
     parser.add_argument(
@@ -342,11 +411,12 @@ def parse_args():
     )
     parser.add_argument(
         "--severities",
-        default=env_or_default("NUCLEI_SEVERITIES", "medium,high,critical"),
+        default=os.environ.get("NUCLEI_SEVERITIES"),
     )
     parser.add_argument(
         "--tags",
-        default=env_or_default("NUCLEI_TAGS", "xss"),
+        default=os.environ.get("NUCLEI_TAGS"),
+        help="Comma-separated tags. Use 'none' to remove the tag restriction.",
     )
     parser.add_argument(
         "--trivy-severities",
@@ -355,42 +425,87 @@ def parse_args():
     parser.add_argument(
         "--rate-limit",
         type=int,
-        default=int(env_or_default("NUCLEI_RATE_LIMIT", "10")),
+        default=os.environ.get("NUCLEI_RATE_LIMIT"),
     )
     parser.add_argument(
         "--concurrency",
         type=int,
-        default=int(env_or_default("NUCLEI_CONCURRENCY", "5")),
+        default=os.environ.get("NUCLEI_CONCURRENCY"),
+    )
+    parser.add_argument(
+        "--bulk-size",
+        type=int,
+        default=os.environ.get("NUCLEI_BULK_SIZE"),
     )
     parser.add_argument(
         "--retries",
         type=int,
-        default=int(env_or_default("NUCLEI_RETRIES", "0")),
+        default=os.environ.get("NUCLEI_RETRIES"),
     )
     parser.add_argument(
         "--request-timeout",
         type=int,
-        default=int(env_or_default("NUCLEI_TIMEOUT_SECONDS", "5")),
+        default=os.environ.get("NUCLEI_TIMEOUT_SECONDS"),
     )
     parser.add_argument(
         "--scan-timeout",
         type=parse_duration,
-        default=parse_duration(env_or_default("NUCLEI_SCAN_TIMEOUT", "5m")),
+        default=os.environ.get("NUCLEI_SCAN_TIMEOUT"),
     )
     parser.add_argument(
         "--template-list-timeout",
         type=parse_duration,
-        default=parse_duration(
-            env_or_default("NUCLEI_TEMPLATE_LIST_TIMEOUT", "2m")
-        ),
+        default=os.environ.get("NUCLEI_TEMPLATE_LIST_TIMEOUT"),
     )
-    parser.add_argument(
+    interactsh_group = parser.add_mutually_exclusive_group()
+    interactsh_group.add_argument(
         "--enable-interactsh",
+        dest="enable_interactsh",
         action="store_true",
-        default=False,
-        help="Enable Interactsh. PR scans disable it by default.",
+        help="Enable Interactsh/OAST templates.",
     )
-    return parser.parse_args()
+    interactsh_group.add_argument(
+        "--disable-interactsh",
+        dest="enable_interactsh",
+        action="store_false",
+        help="Disable Interactsh/OAST templates.",
+    )
+    parser.set_defaults(
+        enable_interactsh=environment_bool(parser, "NUCLEI_ENABLE_INTERACTSH")
+    )
+    stats_group = parser.add_mutually_exclusive_group()
+    stats_group.add_argument(
+        "--show-stats",
+        dest="show_stats",
+        action="store_true",
+        help="Print periodic Nuclei scan statistics.",
+    )
+    stats_group.add_argument(
+        "--hide-stats",
+        dest="show_stats",
+        action="store_false",
+        help="Disable periodic Nuclei scan statistics.",
+    )
+    parser.set_defaults(
+        show_stats=environment_bool(parser, "NUCLEI_SHOW_STATS")
+    )
+    trivy_group = parser.add_mutually_exclusive_group()
+    trivy_group.add_argument(
+        "--require-trivy-report",
+        dest="require_trivy_report",
+        action="store_true",
+        help="Fail when the Trivy report is missing.",
+    )
+    trivy_group.add_argument(
+        "--allow-missing-trivy-report",
+        dest="require_trivy_report",
+        action="store_false",
+        help="Run the base scan even when the Trivy report is unavailable.",
+    )
+    parser.set_defaults(
+        require_trivy_report=environment_bool(parser, "NUCLEI_REQUIRE_TRIVY_REPORT")
+    )
+    return apply_profile_defaults(parser.parse_args())
 
 
 def main():
@@ -409,31 +524,41 @@ def main():
     matched_count = 0
     baseline_findings = 0
     targeted_findings = 0
+    coverage_status = "skipped"
+    coverage_reason = "trivy-report-not-processed"
 
     for output_path in (candidate_path, matched_path, baseline_path, targeted_path):
         touch_empty(output_path)
 
     try:
         validate_target_url(args.target_url)
-        if not args.trivy_report.is_file():
-            raise NucleiExecutionError(
-                f"Trivy report not found: {args.trivy_report}"
-            )
         if not args.converter.is_file():
             raise NucleiExecutionError(
                 f"Trivy converter not found: {args.converter}"
             )
 
-        print("[INFO] Extracting Trivy High/Critical CVE candidates", flush=True)
-        run_trivy_converter(
-            args.converter,
-            args.trivy_report,
-            candidate_path,
-            args.trivy_severities,
-        )
-        candidate_count = len(nonempty_lines(candidate_path))
+        if args.trivy_report.is_file():
+            print("[INFO] Extracting Trivy High/Critical CVE candidates", flush=True)
+            run_trivy_converter(
+                args.converter,
+                args.trivy_report,
+                candidate_path,
+                args.trivy_severities,
+            )
+            candidate_count = len(nonempty_lines(candidate_path))
+            coverage_reason = "no-high-critical-cve-candidate"
+        elif args.require_trivy_report:
+            raise NucleiExecutionError(
+                f"Trivy report not found: {args.trivy_report}"
+            )
+        else:
+            coverage_reason = "trivy-report-not-found"
+            print(
+                "[INFO] Trivy report not found; continuing with the base scan",
+                flush=True,
+            )
 
-        print("[INFO] Running bounded Nuclei baseline scan", flush=True)
+        print(f"[INFO] Running Nuclei {args.profile} base scan", flush=True)
         baseline_container = unique_container_name("baseline")
         baseline_command = docker_nuclei_command(
             reports_dir,
@@ -449,9 +574,6 @@ def main():
             suppress_stdout=True,
             cleanup_container_name=baseline_container,
         )
-
-        coverage_status = "skipped"
-        coverage_reason = "no-high-critical-cve-candidate"
 
         if candidate_count:
             print("[INFO] Listing matching Nuclei templates", flush=True)
@@ -527,6 +649,7 @@ def main():
                 "status": coverage_status,
                 "reason": coverage_reason,
                 "tool": "nuclei-cve-validation",
+                "profile": args.profile,
                 "target": args.target_url,
                 "trivy_candidates": candidate_count,
                 "matched_templates": matched_count,
@@ -543,6 +666,7 @@ def main():
                 "status": "failed",
                 "reason": str(error),
                 "tool": "nuclei-cve-validation",
+                "profile": args.profile,
                 "target": args.target_url,
                 "trivy_candidates": candidate_count,
                 "matched_templates": matched_count,

@@ -1,8 +1,8 @@
 ---
 문서명: Secure PR Gate 프로젝트 기획서
-최신화: 2026-07-23
+최신화: 2026-07-24
 작성자: 이윤재
-Version: 1.4.0
+Version: 1.5.0
 ---
 
 # Secure PR Gate 프로젝트 기획서
@@ -210,6 +210,7 @@ scripts/
   create-pr-comment.py
   runtime-validation.py
   fetch-dynatrace-problems.py
+  run-zap-validation.py
   trivy-to-nuclei.py
   run-nuclei-validation.py
 

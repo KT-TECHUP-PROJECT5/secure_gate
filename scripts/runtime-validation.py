@@ -24,6 +24,7 @@ from urllib.parse import urlparse
 OUTPUT_PATH = Path("security/reports/runtime-report.json")
 DEFAULT_ZAP_REPORT_PATH = Path("security/reports/zap-report.json")
 DEFAULT_NUCLEI_REPORT_PATH = Path("security/reports/nuclei-report.jsonl")
+DEFAULT_NUCLEI_COVERAGE_PATH = Path("security/reports/nuclei-cve-coverage.json")
 DEFAULT_DYNATRACE_PROBLEMS_PATH = Path("security/reports/dynatrace-problems.json")
 DEFAULT_REQUIRED_HEADERS = [
     "x-content-type-options",
@@ -40,6 +41,7 @@ DEFAULT_CUSTOM_CHECKS = [
 ]
 SUPPORTED_CUSTOM_CHECKS = set(DEFAULT_CUSTOM_CHECKS)
 DISABLED_VALUES = {"none", "off", "false", "disable", "disabled"}
+SUPPORTED_REQUIRED_REPORTS = {"zap", "nuclei", "nuclei-coverage", "dynatrace"}
 
 
 def make_finding(finding_id, severity, title, description, location):
@@ -841,6 +843,115 @@ def parse_nuclei_report(nuclei_report_path):
     return findings
 
 
+def parse_nuclei_coverage(nuclei_coverage_path):
+    path = Path(nuclei_coverage_path)
+    if not path.exists():
+        return []
+
+    try:
+        with path.open(encoding="utf-8") as file:
+            data = json.load(file)
+    except json.JSONDecodeError as error:
+        return [
+            make_finding(
+                "runtime.nuclei.coverage-parse-error",
+                "medium",
+                "Nuclei execution coverage could not be parsed",
+                f"Invalid JSON in {path}: {error}",
+                str(path),
+            )
+        ]
+    except OSError as error:
+        return [
+            make_finding(
+                "runtime.nuclei.coverage-read-error",
+                "medium",
+                "Nuclei execution coverage could not be read",
+                f"Could not read {path}: {error}",
+                str(path),
+            )
+        ]
+
+    if not isinstance(data, dict):
+        return [
+            make_finding(
+                "runtime.nuclei.coverage-parse-error",
+                "medium",
+                "Nuclei execution coverage has unexpected structure",
+                "Expected a JSON object containing the Nuclei execution status.",
+                str(path),
+            )
+        ]
+
+    if str(data.get("status") or "").strip().lower() == "failed":
+        return [
+            make_finding(
+                "runtime.nuclei.execution-failed",
+                "high",
+                "Nuclei scan did not complete",
+                str(data.get("reason") or "The Nuclei execution reported a failure."),
+                str(path),
+            )
+        ]
+
+    return []
+
+
+def parse_required_reports(raw_value):
+    normalized = str(raw_value or "").strip().lower()
+    if normalized in DISABLED_VALUES or not normalized:
+        return [], []
+
+    required_reports = []
+    unknown_reports = []
+    for report_name in split_csv(normalized):
+        if report_name in SUPPORTED_REQUIRED_REPORTS:
+            if report_name not in required_reports:
+                required_reports.append(report_name)
+        else:
+            unknown_reports.append(report_name)
+
+    return required_reports, unknown_reports
+
+
+def check_required_reports(args):
+    required_reports, unknown_reports = parse_required_reports(args.required_reports)
+    report_paths = {
+        "zap": Path(args.zap_report),
+        "nuclei": Path(args.nuclei_report),
+        "nuclei-coverage": Path(args.nuclei_coverage),
+        "dynatrace": Path(args.dynatrace_problems),
+    }
+    findings = []
+
+    for report_name in unknown_reports:
+        findings.append(
+            make_config_finding(
+                "RUNTIME_REQUIRED_REPORTS",
+                f"Unsupported required report: {report_name}",
+            )
+        )
+
+    for report_name in required_reports:
+        report_path = report_paths[report_name]
+        if report_path.exists():
+            continue
+        findings.append(
+            make_finding(
+                f"runtime.{report_name}.report-missing",
+                "high",
+                f"Required {report_name} report is missing",
+                (
+                    "The post-deploy validation requires this scanner result, "
+                    "but the expected report file was not created."
+                ),
+                str(report_path),
+            )
+        )
+
+    return findings
+
+
 def map_dynatrace_severity(value):
     severity_level = str(value or "").strip().upper()
     if severity_level in {"AVAILABILITY", "ERROR", "MONITORING_UNAVAILABLE"}:
@@ -1024,6 +1135,7 @@ def make_config_finding(setting_name, message):
 def build_report(args):
     findings = []
     base_url = args.base_url.strip()
+    findings.extend(check_required_reports(args))
 
     if not base_url:
         findings.append(
@@ -1076,6 +1188,7 @@ def build_report(args):
 
     findings.extend(parse_zap_report(args.zap_report))
     findings.extend(parse_nuclei_report(args.nuclei_report))
+    findings.extend(parse_nuclei_coverage(args.nuclei_coverage))
     findings.extend(parse_dynatrace_problems(args.dynatrace_problems))
 
     return {
@@ -1117,6 +1230,13 @@ def parse_args():
         default=env_or_default("NUCLEI_REPORT_PATH", str(DEFAULT_NUCLEI_REPORT_PATH)),
     )
     parser.add_argument(
+        "--nuclei-coverage",
+        default=env_or_default(
+            "NUCLEI_COVERAGE_PATH",
+            str(DEFAULT_NUCLEI_COVERAGE_PATH),
+        ),
+    )
+    parser.add_argument(
         "--dynatrace-problems",
         default=env_or_default(
             "DYNATRACE_PROBLEMS_PATH",
@@ -1127,6 +1247,14 @@ def parse_args():
         "--custom-checks",
         default=env_or_default("CUSTOM_RUNTIME_CHECKS", ",".join(DEFAULT_CUSTOM_CHECKS)),
         help="Comma-separated custom runtime checks. Use 'none' to disable.",
+    )
+    parser.add_argument(
+        "--required-reports",
+        default=env_or_default("RUNTIME_REQUIRED_REPORTS", "none"),
+        help=(
+            "Comma-separated reports required for this run: "
+            "zap,nuclei,nuclei-coverage,dynatrace. Use 'none' for PR compatibility."
+        ),
     )
     parser.add_argument(
         "--custom-username",

@@ -196,10 +196,11 @@ uses: KT-TECHUP-PROJECT5/secure_gate/.github/workflows/pr-security-gate.yml@v1
 │   ├── aggregate-results.py           # 보안 검사 결과 통합
 │   ├── evaluate-gate.py               # 정책 기반 Gate 판단
 │   ├── create-pr-comment.py           # PR 댓글 자동 작성
-│   ├── runtime-validation.py          # D파트 Runtime Validation 제출본
+│   ├── runtime-validation.py          # D파트 Runtime Validation 통합 및 필수 결과 검증
 │   ├── fetch-dynatrace-problems.py    # Dynatrace Problems와 서비스 탐지 상태 수집
+│   ├── run-zap-validation.py          # ZAP PR Baseline/Post-merge Full Scan 실행
 │   ├── trivy-to-nuclei.py             # Trivy High/Critical CVE를 Nuclei 입력으로 변환
-│   └── run-nuclei-validation.py       # Nuclei 기본/CVE 검사 및 결과 통합
+│   └── run-nuclei-validation.py       # Nuclei PR/Post-merge 프로필 및 CVE 결과 통합
 │
 ├── security/
 │   ├── policies/

@@ -1,12 +1,29 @@
 Runtime Validation v4 설명
 작성일: 2026-07-15
-최신화: 2026-07-23
-대상 파일: scripts/runtime-validation.py
+최신화: 2026-07-24
+대상 파일: D파트 Runtime Validation 실행 스크립트
 
 1. 제출용 파일
 
 제출용 파일은 scripts/runtime-validation.py 이다.
 현재 저장소에는 헷갈리지 않도록 v1/v2/v3 학습용 파일을 남기지 않고, 최종 제출용 runtime-validation.py만 사용한다.
+
+D파트 실행 파일은 역할에 따라 다음처럼 나뉜다.
+
+- scripts/run-zap-validation.py
+  PR에서는 ZAP Baseline, Merge 이후에는 ZAP Full Scan을 실행하고 zap-report.json을 만든다.
+
+- scripts/trivy-to-nuclei.py
+  Trivy JSON에서 High/Critical CVE 번호를 추출해 nuclei-cve-ids.txt를 만든다.
+
+- scripts/run-nuclei-validation.py
+  PR 또는 Merge 이후 Nuclei 검사와 CVE 우선 검사를 실행하고 nuclei-report.jsonl을 만든다.
+
+- scripts/fetch-dynatrace-problems.py
+  Dynatrace API에서 열린 문제와 서비스 탐지 상태를 받아 dynatrace-problems.json을 만든다.
+
+- scripts/runtime-validation.py
+  직접 Runtime Check를 수행하고 위 도구들의 결과를 runtime-report.json으로 통합한다.
 
 runtime-validation.py는 실행 중인 웹 애플리케이션을 대상으로 다음 검사를 수행한다.
 
@@ -659,6 +676,49 @@ python scripts/runtime-validation.py
 12. 임시 앱과 PostgreSQL 종료
 
 D파트는 Workflow YAML을 직접 수정하지 않고, 위 실행 기준과 명령어를 A파트에 전달한다.
+
+
+30-1. Merge 이후 실행 프로필
+
+run-zap-validation.py는 --profile 옵션으로 실행 목적을 구분한다.
+
+- --profile pr
+  - zap-baseline.py
+  - Spider 1분
+  - 전체 timeout 10분
+
+- --profile post-merge
+  - zap-full-scan.py
+  - Spider 5분과 Ajax Spider
+  - 전체 timeout 30분
+
+ZAP 종료 코드 1과 2는 finding이 있다는 뜻이므로 실행 성공으로 처리한다.
+종료 코드 3, Docker 오류, timeout, 결과 누락, JSON 오류만 스캐너 실패로 처리한다.
+ZAP Baseline과 Full Scan의 JSON 형식은 같으므로 runtime-validation.py의
+parse_zap_report()는 수정 없이 두 결과를 모두 공통 finding으로 변환한다.
+
+run-nuclei-validation.py는 --profile 옵션으로 실행 목적을 구분한다.
+
+- --profile pr
+  - medium,high,critical
+  - tags=xss
+  - 전체 timeout 5분
+  - Interactsh 비활성화
+  - Trivy 결과 파일 필수
+
+- --profile post-merge
+  - low,medium,high,critical
+  - tags 제한 없음
+  - 전체 timeout 30분
+  - Interactsh 활성화
+  - Trivy 결과가 없어도 광범위 기본 검사는 계속 실행
+
+Merge 이후 runtime-validation.py 실행 시
+RUNTIME_REQUIRED_REPORTS=zap,nuclei,nuclei-coverage,dynatrace를 전달한다.
+필수 결과 파일이 없으면 runtime.<tool>.report-missing High finding을 만들고,
+nuclei-cve-coverage.json의 status가 failed이면
+runtime.nuclei.execution-failed High finding을 만든다.
+이렇게 해야 스캐너가 실행되지 않은 상황을 "탐지 결과 0건"으로 잘못 처리하지 않는다.
 
 
 31. Dynatrace 수집 스크립트

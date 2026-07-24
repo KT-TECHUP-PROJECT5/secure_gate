@@ -1,8 +1,8 @@
 ---
 문서명: 프로젝트 협업용 가이드
-최신화: 2026-07-23
+최신화: 2026-07-24
 작성자: 이윤재
-Version: 1.6.0
+Version: 1.8.0
 ---
 
 # Team Interface — A 파트 연동 가이드
@@ -137,10 +137,10 @@ steps:
 | Staging 실행 환경                 | ECS Cluster/Service `secure-gate-dast`, Launch Type `FARGATE`, 현재 `secure-gate-dast:4`, container `web:8000` | Revision 4 배포 완료 / ALB healthy |
 | Health Check Endpoint             | `HEALTH_CHECK_PATH=/posts`, 기대 상태 코드 `200` | D파트 기준 확정 |
 | Smoke Test 실행 경로              | `SMOKE_TEST_PATHS="/login=200,/posts=200,/upload=200\|303,/docs=200,/redoc=200"` | D파트 기준 확정 |
-| PR ZAP 실행 명령어                | `zap-baseline.py` 실행 후 `security/reports/zap-report.json` 저장 | D파트 전달 완료 / A파트 연결 필요 |
-| PR Nuclei 실행 명령어             | `python3 scripts/run-nuclei-validation.py --target-url http://127.0.0.1:8000/posts --trivy-report security/reports/dependency-report.json`. 기본값은 `medium,high,critical`, `xss`, 전체 timeout 5분 | D파트 실행기 구현 완료 / A파트 연결 필요 |
-| Merge 이후 ZAP Full Scan          | ECS 배포와 Health Check 뒤 `zap-full-scan.py`, Spider 5분, Ajax Spider, 전체 timeout 30분으로 실행 | D파트 전달 완료 / A파트 CD 연결 필요 |
-| Merge 이후 Nuclei 광범위 스캔     | 태그 제한 없이 `low,medium,high,critical`, `rate-limit=20`, `c=10`, 전체 timeout 30분으로 실행 | D파트 전달 완료 / A파트 CD 연결 필요 |
+| PR ZAP 실행 명령어                | `python3 scripts/run-zap-validation.py --profile pr --target-url http://127.0.0.1:8000/posts` 실행 후 `security/reports/zap-report.json` 저장 | D파트 실행기 구현 완료 / A파트 연결 필요 |
+| PR Nuclei 실행 명령어             | `python3 scripts/run-nuclei-validation.py --profile pr --target-url http://127.0.0.1:8000/posts --trivy-report security/reports/dependency-report.json`. 기본값은 `medium,high,critical`, `xss`, 전체 timeout 5분 | D파트 실행기 구현 완료 / A파트 연결 필요 |
+| Merge 이후 ZAP Full Scan          | ECS 배포와 Health Check 뒤 `run-zap-validation.py --profile post-merge`; Spider 5분, Ajax Spider, 전체 timeout 30분 | D파트 실행기 구현 완료 / A파트 CD 연결 필요 |
+| Merge 이후 Nuclei 광범위 스캔     | `run-nuclei-validation.py --profile post-merge`로 태그 제한 없이 `low,medium,high,critical`, `rate-limit=20`, `c=10`, 전체 timeout 30분 실행 | D파트 구현 완료 / A파트 CD 연결 필요 |
 | Trivy CVE 기반 Nuclei 우선 검사   | `scripts/run-nuclei-validation.py`가 C파트 `dependency-report` Artifact의 High/Critical CVE 추출, `nuclei -tl` 사전 확인, 조건부 CVE 검사와 기본 결과 통합을 수행 | D파트 구현·검증 완료 / A파트 Artifact 다운로드 연결 필요 |
 | Trivy-Nuclei 결과 해석 기준       | `Trivy 후보 CVE 수 → Nuclei 매칭 템플릿 수 → Nuclei 실제 finding 수`를 구분. 매칭 템플릿 0개는 `passed`가 아니라 `skipped`, Trivy finding은 Gate에 유지 | D파트 기준 확정 / A·E파트 반영 필요 |
 | Trivy-Nuclei 수동 검증            | Next.js 포트폴리오 기준 Trivy 22건, High 8건, CVE 후보 5개, 매칭 템플릿 1개, 실제 finding 0개 확인 | D파트 검증 완료 |
@@ -153,6 +153,7 @@ steps:
 | Dynatrace 수집                     | `scripts/fetch-dynatrace-problems.py`로 열린 문제와 최근 Service entities를 `security/reports/dynatrace-problems.json`에 저장. 서비스 0건은 High finding | D파트 구현 완료 / A파트 연결 필요 |
 | Dynatrace Secret 매핑              | Workflow의 `DYNATRACE_TOKEN`을 스크립트 환경변수 `DYNATRACE_API_TOKEN`으로 전달. 토큰 범위는 `problems.read`, `entities.read` | A파트 연결 필요 |
 | Runtime Validation 결과 파일 경로 | `security/reports/runtime-report.json` | A파트 고정 |
+| Post-merge 원본 결과 필수 검증    | `RUNTIME_REQUIRED_REPORTS=zap,nuclei,nuclei-coverage,dynatrace`; 누락 또는 Nuclei 실행 실패는 High finding | D파트 구현 완료 / A파트 CD 연결 필요 |
 | 보안 헤더 검증 기준               | CSP, X-Frame-Options, X-Content-Type-Options 등 | 초기 확정 |
 | Runtime Validation 실패 기준      | 통합 finding의 Critical/High → Policy Evaluator | 확정 방향 |
 | PR DAST vs CD DAST                | PR=ZAP Baseline와 제한된 Nuclei 검사, Staging=ZAP Full Scan와 Nuclei 광범위 검사를 순차 실행 | 확정 |
