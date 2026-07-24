@@ -51,29 +51,71 @@ def report_row(label: str, report: dict) -> str:
         return f"| {label} | ❌ Failed | {count}건 |"
 
 
-def finding_guide_block(finding: dict) -> str:
-    icon     = "❌" if finding.get("blocking") else "⚠️"
-    severity = (finding.get("severity") or "").capitalize()
-    title    = finding.get("title") or "(제목 없음)"
-    tool     = finding.get("tool", "-")
-    location = finding.get("location") or "-"
-    guide    = finding.get("guide") or {}
+# 그룹당 나열할 최대 위치 수. 취약점이 많아도 댓글이 GitHub 한계(65536자)를
+# 넘지 않도록, 같은 카테고리는 가이드를 한 번만 쓰고 위치는 이만큼만 보여준다.
+MAX_LOCATIONS_PER_GROUP = 10
 
-    lines = [f"#### {icon} [{severity}] {title} ({tool})", f"- 위치: `{location}`"]
+# 그룹 내 위치를 심각도 높은 순으로 정렬하기 위한 순위.
+SEVERITY_RANK = {"critical": 0, "high": 1, "secret": 2, "medium": 3, "low": 4}
 
+
+def _severity_display(finding: dict) -> str:
+    sev = (finding.get("severity") or "").capitalize()
+    if finding.get("severity_fallback"):
+        return f"{sev}(원본:{finding.get('original_severity')})"
+    return sev
+
+
+def _group_key(finding: dict) -> str:
+    # 같은 카테고리는 같은 수정 가이드를 공유하므로 카테고리 기준으로 묶는다.
+    return finding.get("category") or finding.get("tool") or "기타"
+
+
+def guide_group_block(findings: list, blocking: bool) -> str:
+    """같은 카테고리 finding들을 하나의 블록으로: 가이드 1회 + 위치 목록(상한)."""
+    icon   = "❌" if blocking else "⚠️"
+    sample = findings[0]
+    guide  = sample.get("guide") or {}
+    tool   = sample.get("tool", "-")
+    label  = guide.get("label") or _group_key(sample)
+
+    lines = [f"#### {icon} {label} — {tool} ({len(findings)}건)"]
     if guide.get("summary"):
         lines.append(f"- {guide['summary']}")
     if guide.get("recommendation"):
         lines.append(f"- **조치**: {guide['recommendation']}")
     if guide.get("reference"):
         lines.append(f"- 참고: {guide['reference']}")
-    if finding.get("severity_fallback"):
-        lines.append(
-            f"- ⚠️ 원본 값 `{finding.get('original_severity')}`이(가) 정책에 매핑되어 있지 않아 "
-            f"임시로 `{finding.get('severity')}`로 처리되었습니다."
-        )
+
+    ordered = sorted(
+        findings,
+        key=lambda f: SEVERITY_RANK.get(f.get("severity"), len(SEVERITY_RANK)),
+    )
+    shown = ordered[:MAX_LOCATIONS_PER_GROUP]
+
+    lines.append("- 해당 위치:")
+    for f in shown:
+        title = (f.get("title") or "").strip()
+        if len(title) > 80:
+            title = title[:80] + "…"
+        suffix = f" — {title}" if title else ""
+        lines.append(f"  - [{_severity_display(f)}] `{f.get('location') or '-'}`{suffix}")
+
+    remaining = len(findings) - len(shown)
+    if remaining > 0:
+        lines.append(f"  - …외 {remaining}건 (동일 유형)")
 
     return "\n".join(lines)
+
+
+def _render_grouped(findings: list, blocking: bool, heading: str) -> str:
+    if not findings:
+        return ""
+    groups: dict = {}
+    for f in findings:
+        groups.setdefault(_group_key(f), []).append(f)
+    blocks = "\n\n".join(guide_group_block(items, blocking) for items in groups.values())
+    return f"{heading}\n\n{blocks}"
 
 
 def build_guide_section(decision: dict) -> str:
@@ -89,13 +131,20 @@ def build_guide_section(decision: dict) -> str:
             )
         return ""
 
-    relevant = [f for f in findings if f.get("blocking") or f.get("warning")]
-    if not relevant:
+    blocking = [f for f in findings if f.get("blocking")]
+    warning  = [f for f in findings if f.get("warning") and not f.get("blocking")]
+    if not blocking and not warning:
         return ""
 
-    blocks = "\n\n".join(finding_guide_block(f) for f in relevant)
+    sections = [
+        s for s in (
+            _render_grouped(blocking, True,  "**🚫 차단 대상**"),
+            _render_grouped(warning,  False, "**⚠️ 경고 (수정 권장)**"),
+        ) if s
+    ]
+    body = "\n\n".join(sections)
     return (
-        f"\n### 수정 가이드\n\n{blocks}\n\n"
+        f"\n### 수정 가이드\n\n{body}\n\n"
         f"수정 후 다시 push하면 Security Gate가 재실행됩니다.\n"
     )
 
@@ -176,6 +225,22 @@ def build_adjustment_section(decision: dict) -> str:
     )
 
 
+# GitHub 이슈/PR 댓글 본문 한계는 65536자. 안전 여유를 두고 그 아래에서 자른다.
+MAX_COMMENT_CHARS = 60000
+
+
+def _enforce_length_limit(body: str) -> str:
+    """그룹화 후에도 본문이 한계를 넘으면 마지막 안전장치로 잘라낸다."""
+    if len(body) <= MAX_COMMENT_CHARS:
+        return body
+    notice = (
+        "\n\n> ⚠️ 결과가 많아 댓글이 잘렸습니다. 전체 내역은 "
+        "Actions 아티팩트(gate-decision.json)를 확인하세요.\n"
+        "\n---\n*Secure PR Gate by A-Part Pipeline*"
+    )
+    return body[: MAX_COMMENT_CHARS - len(notice)] + notice
+
+
 def build_comment(decision: dict | None) -> str:
     if decision is None:
         return (
@@ -212,7 +277,7 @@ def build_comment(decision: dict | None) -> str:
     banner = build_banner(decision)
     banner_section = f"\n{banner}\n" if banner else ""
 
-    return (
+    body = (
         f"## Secure PR Gate 결과\n\n"
         f"### 최종 판단\n\n"
         f"**Gate Status: {status_icon} {gate_status}**\n\n"
@@ -227,6 +292,7 @@ def build_comment(decision: dict | None) -> str:
         f"{guide_section}"
         f"\n---\n*Secure PR Gate by A-Part Pipeline*"
     )
+    return _enforce_length_limit(body)
 
 
 def post_comment(token: str, repo: str, pr_number: str, body: str) -> None:
