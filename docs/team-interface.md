@@ -167,6 +167,7 @@ steps:
 | -------------------------- | ------------------------------------------------ | ----------- |
 | Merge 차단 기준            | Critical / High / Secret (초기 정책 적용 중)     | 초기값 적용 |
 | Warning 처리 기준          | Medium (초기 정책 적용 중)                       | 초기값 적용 |
+| Aggregator 기준선          | `docs/aggregator-policy-baseline.md`의 Baseline v0.1 | 팀 합의 전 |
 | CVSS 등급 기준             |                                                  | 미확정      |
 | 도구별 Severity 매핑 기준  |                                                  | 미확정      |
 | PR 댓글 수정 가이드 템플릿 | `security/templates/pr-comment-template.md` 참고 | 미확정      |

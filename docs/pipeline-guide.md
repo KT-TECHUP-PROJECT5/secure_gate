@@ -348,6 +348,9 @@ security/reports/
 ## Gate 정책
 
 `security/policies/security-gate-policy.json`에서 관리한다.
+현재 동작과 팀 합의가 필요한 임시 기준은
+[`docs/aggregator-policy-baseline.md`](./aggregator-policy-baseline.md)에 정리한다.
+이 기준은 Baseline v0.1이며 최종 정책이 아니다.
 
 | 조건 | 처리 |
 | --- | --- |
