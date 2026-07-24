@@ -21,8 +21,9 @@ aggregate-results.py
 }
 """
 
+import argparse
 import json
-import sys
+import os
 from pathlib import Path
 
 REPORTS_DIR = Path("security/reports")
@@ -37,20 +38,189 @@ REPORT_FILES = {
 }
 
 
-def load_report(filename: str) -> dict:
+def select_report_files(raw_value: str) -> dict[str, str]:
+    if not raw_value.strip():
+        return dict(REPORT_FILES)
+
+    keys = [key.strip() for key in raw_value.split(",") if key.strip()]
+    unknown = [key for key in keys if key not in REPORT_FILES]
+    if unknown:
+        raise ValueError(f"Unknown report key(s): {', '.join(unknown)}")
+    return {key: REPORT_FILES[key] for key in keys}
+
+
+def finding_status(findings: list[dict]) -> str:
+    severities = {
+        str(finding.get("severity", "")).lower()
+        for finding in findings
+        if isinstance(finding, dict)
+    }
+    if severities & {"critical", "high", "secret"}:
+        return "failed"
+    if severities:
+        return "warning"
+    return "passed"
+
+
+def normalize_semgrep(data: dict) -> dict:
+    findings = []
+    severity_map = {"ERROR": "high", "WARNING": "medium", "INFO": "low"}
+    for result in data.get("results", []):
+        if not isinstance(result, dict):
+            continue
+        extra = result.get("extra") if isinstance(result.get("extra"), dict) else {}
+        start = result.get("start") if isinstance(result.get("start"), dict) else {}
+        path = str(result.get("path") or "semgrep")
+        line = start.get("line")
+        findings.append(
+            {
+                "id": str(result.get("check_id") or "semgrep.finding"),
+                "severity": severity_map.get(
+                    str(extra.get("severity") or "WARNING").upper(), "medium"
+                ),
+                "title": str(result.get("check_id") or "Semgrep finding"),
+                "description": str(extra.get("message") or "Semgrep reported a finding."),
+                "location": f"{path}:{line}" if line else path,
+            }
+        )
+
+    scanner_errors = data.get("errors")
+    has_scanner_errors = isinstance(scanner_errors, list) and bool(scanner_errors)
+    return {
+        "status": "error" if has_scanner_errors else finding_status(findings),
+        "tool": "semgrep",
+        "findings": findings,
+        "errors": scanner_errors if has_scanner_errors else [],
+    }
+
+
+def normalize_gitleaks(data: list) -> dict:
+    findings = []
+    for result in data:
+        if not isinstance(result, dict):
+            continue
+        path = str(result.get("File") or result.get("file") or "gitleaks")
+        line = result.get("StartLine") or result.get("startLine")
+        findings.append(
+            {
+                "id": str(
+                    result.get("RuleID")
+                    or result.get("RuleId")
+                    or result.get("ruleID")
+                    or "gitleaks.secret"
+                ),
+                "severity": "secret",
+                "title": str(
+                    result.get("Description")
+                    or result.get("description")
+                    or "Potential secret detected"
+                ),
+                "description": "Gitleaks detected a potential secret. The value is redacted.",
+                "location": f"{path}:{line}" if line else path,
+            }
+        )
+    return {
+        "status": finding_status(findings),
+        "tool": "gitleaks",
+        "findings": findings,
+    }
+
+
+def normalize_trivy(data: dict) -> dict:
+    findings = []
+    for result in data.get("Results", []):
+        if not isinstance(result, dict):
+            continue
+        target = str(result.get("Target") or "trivy")
+        vulnerabilities = result.get("Vulnerabilities") or []
+        if not isinstance(vulnerabilities, list):
+            continue
+        for vulnerability in vulnerabilities:
+            if not isinstance(vulnerability, dict):
+                continue
+            package = str(vulnerability.get("PkgName") or "unknown-package")
+            installed = str(vulnerability.get("InstalledVersion") or "unknown")
+            fixed = str(vulnerability.get("FixedVersion") or "")
+            description = (
+                f"{package}@{installed} is affected."
+                + (f" Fixed version: {fixed}." if fixed else "")
+            )
+            findings.append(
+                {
+                    "id": str(
+                        vulnerability.get("VulnerabilityID") or "trivy.vulnerability"
+                    ),
+                    "severity": str(
+                        vulnerability.get("Severity") or "UNKNOWN"
+                    ).lower(),
+                    "title": str(
+                        vulnerability.get("Title")
+                        or vulnerability.get("VulnerabilityID")
+                        or "Trivy vulnerability"
+                    ),
+                    "description": description,
+                    "location": f"{target}:{package}",
+                }
+            )
+    return {
+        "status": finding_status(findings),
+        "tool": "trivy",
+        "findings": findings,
+    }
+
+
+def normalize_report(key: str, data: object) -> dict:
+    if key == "sast" and isinstance(data, dict) and isinstance(data.get("results"), list):
+        return normalize_semgrep(data)
+    if key == "secret_scan" and isinstance(data, list):
+        return normalize_gitleaks(data)
+    if (
+        key == "dependency_scan"
+        and isinstance(data, dict)
+        and data.get("SchemaVersion") == 2
+        and isinstance(data.get("Results"), list)
+    ):
+        return normalize_trivy(data)
+    if isinstance(data, dict) and isinstance(data.get("findings"), list):
+        return data
+    return {
+        "status": "error",
+        "tool": key,
+        "findings": [],
+        "errors": ["unsupported-report-schema"],
+    }
+
+
+def load_report(key: str, filename: str) -> dict:
     path = REPORTS_DIR / filename
     if not path.exists():
-        print(f"[WARN] Report not found: {filename} — treated as not_run")
+        print(f"[ERROR] Required report not found: {filename}")
         return {"status": "not_found", "tool": filename, "findings": []}
     try:
         with open(path) as f:
-            return json.load(f)
-    except json.JSONDecodeError as e:
+            data = json.load(f)
+        return normalize_report(key, data)
+    except (json.JSONDecodeError, OSError) as e:
         print(f"[ERROR] Failed to parse {filename}: {e}")
         return {"status": "error", "tool": filename, "findings": []}
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Aggregate Secure Gate reports.")
+    parser.add_argument(
+        "--reports",
+        default=os.environ.get("SECURE_GATE_REPORTS", ""),
+        help=(
+            "Comma-separated report keys to require. "
+            "Default: build,sast,secret_scan,dependency_scan,runtime_validation"
+        ),
+    )
+    args = parser.parse_args()
+    try:
+        report_files = select_report_files(args.reports)
+    except ValueError as error:
+        parser.error(str(error))
+
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
     summary = {
@@ -60,11 +230,14 @@ def main():
         "has_high": False,
         "has_secret": False,
         "has_medium": False,
+        "has_error": False,
     }
 
-    for key, filename in REPORT_FILES.items():
-        report = load_report(filename)
+    for key, filename in report_files.items():
+        report = load_report(key, filename)
         summary["reports"][key] = report
+        if report.get("status") in {"error", "not_found"} or report.get("errors"):
+            summary["has_error"] = True
 
         for finding in report.get("findings", []):
             summary["total_findings"] += 1
@@ -87,6 +260,7 @@ def main():
     print(f"     High           : {summary['has_high']}")
     print(f"     Secret         : {summary['has_secret']}")
     print(f"     Medium         : {summary['has_medium']}")
+    print(f"     Report error   : {summary['has_error']}")
 
 
 if __name__ == "__main__":

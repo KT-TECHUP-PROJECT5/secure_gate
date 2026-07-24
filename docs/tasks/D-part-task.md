@@ -120,7 +120,8 @@ D파트는 실행 중인 테스트/Staging 환경을 대상으로 런타임 보�
 | `RUNTIME_REQUIRED_REPORTS` | Post-merge: `zap,nuclei,nuclei-coverage,dynatrace` |
 | `DYNATRACE_ENV_URL` | `https://xlj20734.live.dynatrace.com` |
 | `DYNATRACE_PROBLEM_SELECTOR` | `status("open")` |
-| `DYNATRACE_SERVICE_ENTITY_SELECTOR` | `type("SERVICE")` |
+| `DYNATRACE_ENTITY_SELECTOR` | `type("SERVICE"),entityName.equals("OWASP practice board DAST")` |
+| `DYNATRACE_SERVICE_ENTITY_SELECTOR` | `type("SERVICE"),entityName.equals("OWASP practice board DAST")` |
 | Dynatrace Synthetic Monitor | `secure-gate-staging-health` / `HTTP_CHECK-D9507A08C7F0DC5E` / Busan / 5분 |
 | `DYNATRACE_FROM` | `now-30m` |
 | `DYNATRACE_PROBLEMS_PATH` | `security/reports/dynatrace-problems.json` |

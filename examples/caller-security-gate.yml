@@ -48,9 +48,7 @@ jobs:
       # dependency_track_project_version: main
       # dependency_track_upload_mode: main-only
       # 상세: docs/dependency-track.md
-    secrets: inherit
-    # Dynatrace / Dependency-Track 확장 시:
-    # secrets:
-    #   DYNATRACE_TOKEN: ${{ secrets.DYNATRACE_TOKEN }}
-    #   DEPENDENCY_TRACK_URL: ${{ secrets.DEPENDENCY_TRACK_URL }}       # Backend API base URL (UI 아님)
-    #   DEPENDENCY_TRACK_API_KEY: ${{ secrets.DEPENDENCY_TRACK_API_KEY }}
+    # 필요한 Secret만 명시적으로 전달한다.
+    secrets:
+      DEPENDENCY_TRACK_URL: ${{ secrets.DEPENDENCY_TRACK_URL }}
+      DEPENDENCY_TRACK_API_KEY: ${{ secrets.DEPENDENCY_TRACK_API_KEY }}

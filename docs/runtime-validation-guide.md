@@ -50,10 +50,10 @@ D파트는 Workflow YAML을 직접 수정하지 않고, 아래 실행 방식과 
 | Nuclei 결과 파일 경로 | 통합 finding은 `security/reports/nuclei-report.jsonl`, CVE 검사 수행 상태는 `security/reports/nuclei-cve-coverage.json` |
 | Trivy CVE 연동 | C파트 `dependency-scan` Job이 생성한 원본 `security/reports/dependency-report.json` Artifact를 A파트가 다운로드한다. `run-nuclei-validation.py`가 High/Critical CVE 추출, 템플릿 사전 확인, 조건부 검사와 결과 통합을 수행한다. |
 | Dynatrace 실행 방식 | ECS Service는 OneAgent Code Module이 포함된 `secure-gate-dast:4`를 실행 중이다. Python Agent가 Uvicorn 프로세스에 로드되고 Dynatrace endpoint에 연결된 것까지 확인했다. `fetch-dynatrace-problems.py`가 Problems와 최근 `SERVICE` 엔티티를 함께 조회한다. |
-| Dynatrace 설정값 | Environment URL은 `https://xlj20734.live.dynatrace.com`, Problem selector는 `status("open")`, Service selector는 `type("SERVICE")`이다. ECS 설치용 PaaS Token과 조회용 `problems.read` + `entities.read` 토큰은 분리한다. APM 엔티티의 `environment:staging` 태그 적용을 확인하기 전에는 Problem selector에 해당 태그 조건을 넣지 않는다. |
+| Dynatrace 설정값 | Environment URL은 `https://xlj20734.live.dynatrace.com`, Problem selector는 `status("open")`, Problems/Service entity selector는 `type("SERVICE"),entityName.equals("OWASP practice board DAST")`이다. ECS 설치용 PaaS Token과 조회용 `problems.read` + `entities.read` 토큰은 분리한다. |
 | Dynatrace 결과 파일 경로 | `security/reports/dynatrace-problems.json`에 `problems`와 `serviceCoverage`가 함께 저장되고, 공통 스키마 통합 결과는 `security/reports/runtime-report.json`이다. |
 | 보안 헤더 검증 기준 | HTTP: `x-content-type-options`, `x-frame-options`, `content-security-policy`. HTTPS에서는 `strict-transport-security`를 자동으로 추가한다. |
-| Custom Runtime Check | `debug-exposure`, `docs-exposure`, `reflected-xss`, `search-sqli`, `admin-access`, `idor`를 기본 실행한다. |
+| Custom Runtime Check | 스크립트 직접 실행 기본값은 `debug-exposure`, `docs-exposure`, `reflected-xss`, `search-sqli`, `admin-access`, `idor`다. 범용 Post-merge Reusable Workflow는 애플리케이션별 인증정보 오용을 막기 위해 기본값을 `none`으로 둔다. |
 | Runtime Validation 실패 기준 | Critical/High/Secret finding이 하나라도 있으면 `failed`, Medium/Low만 있으면 `warning`, finding이 없으면 `passed`. PR의 Merge 차단과 배포 후 승격 차단은 E파트 Policy Evaluator가 결정한다. |
 
 ZAP, Nuclei, Dynatrace 원본 결과는 각각 중간 입력으로 보존한다. 이를 공통 finding으로 변환한 D파트 최종 결과는 `security/reports/runtime-report.json`이다.
@@ -66,7 +66,8 @@ ZAP_TARGET_URL=http://www.securegate.n-e.kr/posts
 NUCLEI_TARGET_URL=http://www.securegate.n-e.kr/posts
 DYNATRACE_ENV_URL=https://xlj20734.live.dynatrace.com
 DYNATRACE_PROBLEM_SELECTOR=status("open")
-DYNATRACE_SERVICE_ENTITY_SELECTOR=type("SERVICE")
+DYNATRACE_ENTITY_SELECTOR=type("SERVICE"),entityName.equals("OWASP practice board DAST")
+DYNATRACE_SERVICE_ENTITY_SELECTOR=type("SERVICE"),entityName.equals("OWASP practice board DAST")
 HEALTH_CHECK_PATH=/posts
 SMOKE_TEST_PATHS=/login=200,/posts=200,/upload=200|303,/docs=200,/redoc=200
 ```
@@ -214,7 +215,8 @@ HTTP Monitor 생성은 현재 API가 아니라 UI에서 수행한다. Monitor가
 ```zsh
 export DYNATRACE_ENV_URL=https://xlj20734.live.dynatrace.com
 export DYNATRACE_PROBLEM_SELECTOR='status("open")'
-export DYNATRACE_SERVICE_ENTITY_SELECTOR='type("SERVICE")'
+export DYNATRACE_ENTITY_SELECTOR='type("SERVICE"),entityName.equals("OWASP practice board DAST")'
+export DYNATRACE_SERVICE_ENTITY_SELECTOR='type("SERVICE"),entityName.equals("OWASP practice board DAST")'
 read -s "DYNATRACE_API_TOKEN?Dynatrace API token: "
 echo
 export DYNATRACE_API_TOKEN
@@ -265,7 +267,8 @@ D파트 스크립트는 다음 GitHub 설정을 사용하며 A파트 Workflow가
 | --- | --- |
 | Repository Variable `DYNATRACE_ENV_URL` | `https://xlj20734.live.dynatrace.com` |
 | Repository Variable `DYNATRACE_PROBLEM_SELECTOR` | `status("open")` |
-| Repository Variable `DYNATRACE_SERVICE_ENTITY_SELECTOR` | `type("SERVICE")` |
+| Repository Variable `DYNATRACE_ENTITY_SELECTOR` | `type("SERVICE"),entityName.equals("OWASP practice board DAST")` |
+| Repository Variable `DYNATRACE_SERVICE_ENTITY_SELECTOR` | `type("SERVICE"),entityName.equals("OWASP practice board DAST")` |
 | Repository Secret `DYNATRACE_TOKEN` | `problems.read`, `entities.read` 읽기 전용 토큰 |
 
 Workflow의 Secret 이름은 `DYNATRACE_TOKEN`이고 Python 스크립트가 읽는 환경변수 이름은 `DYNATRACE_API_TOKEN`이다. CD Workflow의 수집 step에서 다음과 같이 매핑한다.

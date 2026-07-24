@@ -157,8 +157,11 @@ Gate Status: ❌ FAILED
 3. `uses:` 경로의 태그를 `@v1`(또는 `@v1.0.0`)로 맞춘다.
 4. (선택) PR 단계 DAST를 쓰려면 `enable_dast: true`와 `install_command` / `build_command` / `start_command`를 설정한다.
    EC2는 필수가 아니다. runner에서 앱을 띄운 뒤 localhost 대상으로 검사한다.
-5. Post-merge caller에는 `STAGING_URL`, `DYNATRACE_ENV_URL` Repository Variables와
-   `DYNATRACE_TOKEN` Repository Secret을 등록한다.
+5. Post-merge caller에는 `STAGING_URL`, `DYNATRACE_ENV_URL`,
+   `DYNATRACE_PROBLEM_SELECTOR`, `DYNATRACE_ENTITY_SELECTOR`,
+   `DYNATRACE_SERVICE_ENTITY_SELECTOR` Repository Variables와
+   `DYNATRACE_TOKEN` Repository Secret을 등록한다. 두 entity selector는
+   전체 서비스가 아닌 해당 애플리케이션으로 범위를 제한해야 한다.
 6. Branch Protection에서 Secure PR Gate Check를 Required로 설정한다.
 
 자세한 연동·inputs·버전 배포·PR/CD DAST 구분은 [docs/pipeline-guide.md](docs/pipeline-guide.md)를 참고한다.

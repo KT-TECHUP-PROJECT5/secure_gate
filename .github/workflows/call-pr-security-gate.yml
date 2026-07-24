@@ -37,4 +37,6 @@ jobs:
       # dependency_track_upload_mode: main-only  # PR에서는 skip, main push에서 업로드
       # secrets: DEPENDENCY_TRACK_URL (Backend API), DEPENDENCY_TRACK_API_KEY
       # 상세: docs/dependency-track.md
-    secrets: inherit
+    secrets:
+      DEPENDENCY_TRACK_URL: ${{ secrets.DEPENDENCY_TRACK_URL }}
+      DEPENDENCY_TRACK_API_KEY: ${{ secrets.DEPENDENCY_TRACK_API_KEY }}

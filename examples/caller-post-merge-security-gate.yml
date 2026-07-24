@@ -1,9 +1,12 @@
 name: Post-merge Security Gate
 
+# "Deploy Staging"을 실제 배포 Workflow의 name 값으로 변경한다.
 on:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows:
+      - Deploy Staging
+    types:
+      - completed
   workflow_dispatch:
 
 permissions:
@@ -11,6 +14,10 @@ permissions:
 
 jobs:
   post-merge-security-gate:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main')
     uses: KT-TECHUP-PROJECT5/secure_gate/.github/workflows/post-merge-security-gate.yml@v1
     with:
       gate_repository: KT-TECHUP-PROJECT5/secure_gate
@@ -19,7 +26,8 @@ jobs:
       health_path: ${{ vars.HEALTH_CHECK_PATH || '/health' }}
       smoke_paths: ${{ vars.SMOKE_TEST_PATHS || '/' }}
       dynatrace_environment_url: ${{ vars.DYNATRACE_ENV_URL }}
-      dynatrace_problem_selector: ${{ vars.DYNATRACE_PROBLEM_SELECTOR || 'status("open")' }}
-      dynatrace_service_entity_selector: ${{ vars.DYNATRACE_SERVICE_ENTITY_SELECTOR || 'type("SERVICE")' }}
+      dynatrace_problem_selector: ${{ vars.DYNATRACE_PROBLEM_SELECTOR }}
+      dynatrace_entity_selector: ${{ vars.DYNATRACE_ENTITY_SELECTOR }}
+      dynatrace_service_entity_selector: ${{ vars.DYNATRACE_SERVICE_ENTITY_SELECTOR }}
     secrets:
       DYNATRACE_TOKEN: ${{ secrets.DYNATRACE_TOKEN }}

@@ -139,7 +139,7 @@ steps:
 | Smoke Test 실행 경로              | `SMOKE_TEST_PATHS="/login=200,/posts=200,/upload=200\|303,/docs=200,/redoc=200"` | D파트 기준 확정 |
 | PR ZAP 실행 명령어                | `python3 scripts/run-zap-validation.py --profile pr --target-url http://127.0.0.1:8000/posts` 실행 후 `security/reports/zap-report.json` 저장 | Workflow 연결 완료 |
 | PR Nuclei 실행 명령어             | `python3 scripts/run-nuclei-validation.py --profile pr --target-url http://127.0.0.1:8000/posts --trivy-report security/reports/dependency-report.json`. 기본값은 `medium,high,critical`, `xss`, 전체 timeout 5분 | Workflow 연결 완료 |
-| Post-merge Reusable Workflow      | `post-merge-security-gate.yml`을 각 애플리케이션의 `push: main` caller가 호출 | 연결 완료 |
+| Post-merge Reusable Workflow      | `post-merge-security-gate.yml`을 각 애플리케이션의 Staging 배포 성공 후 caller가 호출 | 연결 완료 |
 | Merge 이후 ZAP Full Scan          | ECS 배포와 Health Check 뒤 `run-zap-validation.py --profile post-merge`; Spider 5분, Ajax Spider, 전체 timeout 30분 | CD Workflow 연결 완료 |
 | Merge 이후 Nuclei 광범위 스캔     | `run-nuclei-validation.py --profile post-merge`로 태그 제한 없이 `low,medium,high,critical`, `rate-limit=20`, `c=10`, 전체 timeout 30분 실행 | CD Workflow 연결 완료 |
 | Trivy CVE 기반 Nuclei 우선 검사   | `scripts/run-nuclei-validation.py`가 C파트 `dependency-report` Artifact의 High/Critical CVE 추출, `nuclei -tl` 사전 확인, 조건부 CVE 검사와 기본 결과 통합을 수행 | Artifact 다운로드 연결 완료 |

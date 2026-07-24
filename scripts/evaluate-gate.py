@@ -43,6 +43,12 @@ def evaluate(summary: dict, policy: dict) -> dict:
     block_reasons = []
     warnings      = []
 
+    if summary.get("has_error"):
+        blocked = True
+        block_reasons.append(
+            "필수 보안 보고서가 누락되었거나 올바르게 처리되지 않았습니다."
+        )
+
     if policy.get("blockOnCritical") and summary.get("has_critical"):
         blocked = True
         block_reasons.append("Critical 등급 취약점이 탐지되었습니다.")

@@ -36,7 +36,7 @@ on:
         description: Runtime custom checks, or none to disable
         type: string
         required: false
-        default: "debug-exposure,docs-exposure,reflected-xss,search-sqli,admin-access,idor"
+        default: "none"
       dynatrace_environment_url:
         description: Dynatrace SaaS environment URL
         type: string
@@ -44,13 +44,15 @@ on:
       dynatrace_problem_selector:
         description: Dynatrace Problems API selector
         type: string
-        required: false
-        default: 'status("open")'
-      dynatrace_service_entity_selector:
-        description: Dynatrace service entity selector
+        required: true
+      dynatrace_entity_selector:
+        description: Application-scoped entity selector for Dynatrace problems
         type: string
-        required: false
-        default: 'type("SERVICE")'
+        required: true
+      dynatrace_service_entity_selector:
+        description: Application-scoped Dynatrace service entity selector
+        type: string
+        required: true
       policy_path:
         description: Policy path in caller repository; empty uses Secure Gate default
         type: string
@@ -90,6 +92,48 @@ jobs:
             security/reports/runtime-report.json \
             security/reports/security-summary.json \
             security/reports/gate-decision.json
+
+      - name: Validate post-merge configuration
+        env:
+          TARGET_URL: ${{ inputs.target_url }}
+          DYNATRACE_ENV_URL: ${{ inputs.dynatrace_environment_url }}
+          DYNATRACE_PROBLEM_SELECTOR: ${{ inputs.dynatrace_problem_selector }}
+          DYNATRACE_ENTITY_SELECTOR: ${{ inputs.dynatrace_entity_selector }}
+          DYNATRACE_SERVICE_ENTITY_SELECTOR: ${{ inputs.dynatrace_service_entity_selector }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import sys
+
+          required = {
+              "target_url": os.environ["TARGET_URL"],
+              "dynatrace_environment_url": os.environ["DYNATRACE_ENV_URL"],
+              "dynatrace_problem_selector": os.environ["DYNATRACE_PROBLEM_SELECTOR"],
+              "dynatrace_entity_selector": os.environ["DYNATRACE_ENTITY_SELECTOR"],
+              "dynatrace_service_entity_selector": os.environ[
+                  "DYNATRACE_SERVICE_ENTITY_SELECTOR"
+              ],
+          }
+          missing = [name for name, value in required.items() if not value.strip()]
+          if missing:
+              print(
+                  f"[ERROR] Required post-merge inputs are empty: {', '.join(missing)}",
+                  file=sys.stderr,
+              )
+              raise SystemExit(2)
+
+          global_selector = 'type("SERVICE")'
+          for name in (
+              "dynatrace_entity_selector",
+              "dynatrace_service_entity_selector",
+          ):
+              if required[name].replace(" ", "").upper() == global_selector.upper():
+                  print(
+                      f"[ERROR] {name} must identify this application, not every service",
+                      file=sys.stderr,
+                  )
+                  raise SystemExit(2)
+          PY
 
       - name: Verify staging health
         env:
@@ -131,6 +175,7 @@ jobs:
           DYNATRACE_API_TOKEN: ${{ secrets.DYNATRACE_TOKEN }}
           DYNATRACE_ENV_URL: ${{ inputs.dynatrace_environment_url }}
           DYNATRACE_PROBLEM_SELECTOR: ${{ inputs.dynatrace_problem_selector }}
+          DYNATRACE_ENTITY_SELECTOR: ${{ inputs.dynatrace_entity_selector }}
           DYNATRACE_SERVICE_ENTITY_SELECTOR: ${{ inputs.dynatrace_service_entity_selector }}
         run: |
           python3 .secure-gate/scripts/fetch-dynatrace-problems.py \
@@ -157,7 +202,9 @@ jobs:
 
       - name: Aggregate post-merge results
         if: always()
-        run: python3 .secure-gate/scripts/aggregate-results.py
+        run: |
+          python3 .secure-gate/scripts/aggregate-results.py \
+            --reports runtime_validation
 
       - name: Resolve policy file
         id: policy

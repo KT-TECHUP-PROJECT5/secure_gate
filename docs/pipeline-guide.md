@@ -19,7 +19,7 @@ Secure PR Gate는 GitHub Actions **Reusable Workflow** 기반 DevSecOps 보안 �
 | 항목 | Caller (일반 Workflow) | Reusable Workflow |
 | --- | --- | --- |
 | 파일 | PR/Post-merge caller | `pr-security-gate.yml`, `post-merge-security-gate.yml` |
-| 트리거 | `pull_request` 또는 `push: main` | `workflow_call` |
+| 트리거 | `pull_request` 또는 Staging 배포 완료 | `workflow_call` |
 | 역할 | 실행 시점·배포 순서 결정, inputs 전달 | 프로필별 보안 검사·Gate 실행 |
 | 배포 | 사용자 저장소에 최소 파일 추가 | `uses: ...@v1` 로 버전 고정 호출 |
 
@@ -30,7 +30,7 @@ Secure PR Gate는 GitHub Actions **Reusable Workflow** 기반 DevSecOps 보안 �
   -> SAST / Secret / Dependency / Runtime / Aggregate / Gate / PR Comment
 
 사용자 main 병합 및 Staging 배포
-  -> 사용자 저장소 post-merge caller.yml (push: main)
+  -> 사용자 저장소 post-merge caller.yml (배포 workflow 완료)
   -> uses: KT-TECHUP-PROJECT5/secure_gate/.../post-merge-security-gate.yml@v1
   -> Health / ZAP Full / Nuclei 확대 / Dynatrace / Runtime / Policy
 ```
@@ -67,23 +67,24 @@ Secure PR Gate는 GitHub Actions **Reusable Workflow** 기반 DevSecOps 보안 �
 Staging URL을 입력받아 Health Check, ZAP/Nuclei `post-merge` 프로필, Dynatrace 수집,
 필수 원본 보고서 검증 및 Policy Evaluator를 실행한다.
 
-### 4. `cd-staging.yml` — 이 저장소용 Staging Caller
+### 4. `cd-staging.yml` — 이 저장소용 수동 Staging 검증 Caller
 
-트리거: `push` → `main`
+트리거: `workflow_dispatch`
 
 | Job | 역할 | 상태 |
 | --- | --- | --- |
-| `docker-build` | Docker 이미지 빌드 | Placeholder (4차 구현) |
-| `staging-deploy` | Staging 환경 배포 | Placeholder (4차 구현) |
-| `post-deploy-validation` | `post-merge-security-gate.yml` 호출 | Reusable 연결 완료 |
+| `post-deploy-validation` | 기존 Staging을 대상으로 `post-merge-security-gate.yml` 호출 | Reusable 연결 완료 |
+
+실제 애플리케이션은 배포가 완료된 뒤
+`examples/caller-post-merge-security-gate.yml` 패턴으로 Reusable Workflow를 호출한다.
 
 ### 5. PR DAST와 Staging CD DAST 역할 구분
 
 DAST는 PR Gate와 Staging CD에서 목적이 다르다. `enable_dast=true`이고 Staging 배포 후에도 DAST를 돌리면 검사가 두 번 실행될 수 있다.
 
-| 구분 | PR Security Gate | Staging CD (`cd-staging.yml`) |
+| 구분 | PR Security Gate | 애플리케이션 Post-merge Caller |
 | --- | --- | --- |
-| 트리거 | `pull_request` | `push` → `main` |
+| 트리거 | `pull_request` | Staging 배포 성공 후 |
 | 환경 | runner-local 또는 `target_url` | 실제 Staging 배포 환경 |
 | 목적 | Merge 전 선택적·경량 동적 검사 | 배포 후 환경·헤더·프록시까지 포함한 재검증 |
 | 도구 | ZAP, Nuclei, 직접 보안 헤더 검사 | Health Check, Smoke Test, DAST |
@@ -104,6 +105,8 @@ PR 단계에서는 시간을 고려해 Baseline·제한 심각도 중심의 검�
 3. (선택, DAST) `install_command` / `build_command` / `start_command` / `app_port` / `health_path`  
    또는 이미 떠 있는 `target_url`
 4. Branch Protection에서 Secure PR Gate Check를 Required로 설정
+5. Post-merge 사용 시 Staging 배포 완료 Workflow와
+   [`examples/caller-post-merge-security-gate.yml`](../examples/caller-post-merge-security-gate.yml)을 연결
 
 EC2나 Staging 서버는 **필수가 아니다.**  
 기본은 GitHub Actions runner에서 앱을 기동하는 `runner-local` 방식이다.
@@ -135,7 +138,9 @@ jobs:
       start_command: npm start
       app_port: "3000"
       health_path: /health
-    secrets: inherit
+    secrets:
+      DEPENDENCY_TRACK_URL: ${{ secrets.DEPENDENCY_TRACK_URL }}
+      DEPENDENCY_TRACK_API_KEY: ${{ secrets.DEPENDENCY_TRACK_API_KEY }}
 ```
 
 ### Inputs 계약
@@ -165,21 +170,22 @@ jobs:
 
 | Secret | 필수 | 설명 |
 | --- | --- | --- |
-| `GITHUB_TOKEN` | 자동 | PR 댓글용 (`secrets: inherit` 권장) |
-| `DYNATRACE_TOKEN` | 선택 | Dynatrace Problems와 Service entities 조회용. `problems.read`, `entities.read` 범위의 읽기 전용 토큰을 등록하고 실행 step에서 `DYNATRACE_API_TOKEN`으로 매핑한다. |
+| `GITHUB_TOKEN` | 자동 | PR 댓글용. 별도 전달 불필요 |
 | `DEPENDENCY_TRACK_URL` | 선택 | Dependency-Track **Backend API** base URL (UI 전용 주소 아님) |
 | `DEPENDENCY_TRACK_API_KEY` | 선택 | Dependency-Track API Key |
+| `DYNATRACE_TOKEN` | Post-merge 필수 | Post-merge Reusable Workflow에서 Problems와 Service entities 조회 |
 
 URL / API Key가 없으면 Dependency-Track 업로드만 skip한다. Trivy CVE Gate와 SBOM artifact는 계속 진행된다.
 
-Dynatrace 연동에 필요한 D파트 전달값은 다음과 같다. 현재 Workflow에는 토큰 선언만 있고 실제 수집 step은 아직 연결되지 않았으므로 A파트가 D파트 가이드의 순서대로 연결해야 한다.
+Dynatrace 연동값은 Post-merge caller가 Reusable Workflow에 전달한다.
 
 | 구분 | 값 |
 | --- | --- |
 | Environment URL | `https://xlj20734.live.dynatrace.com` |
 | Staging URL | `http://www.securegate.n-e.kr` |
 | Problem Selector | `status("open")` |
-| Service Entity Selector | `type("SERVICE")` |
+| Problem Entity Selector | `type("SERVICE"),entityName.equals("OWASP practice board DAST")` |
+| Service Entity Selector | `type("SERVICE"),entityName.equals("OWASP practice board DAST")` |
 | 수집 스크립트 | `scripts/fetch-dynatrace-problems.py` |
 | 원본 결과 | `security/reports/dynatrace-problems.json` |
 | 통합 결과 | `security/reports/runtime-report.json` |
