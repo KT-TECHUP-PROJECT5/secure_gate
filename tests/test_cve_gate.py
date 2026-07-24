@@ -531,6 +531,33 @@ class ProfileTests(unittest.TestCase):
         self.assertTrue(dec["blocked"]); self.assertEqual(rc, 1)
 
 
+class MonitorBypassTests(unittest.TestCase):
+    """monitor 모드 + bypass 조합: bypass 다운그레이드/suppression 은 mode 와
+    무관하게 계산되지만(=_handle_track_failure), monitor 는 어차피 차단하지
+    않으므로 두 신호가 충돌 없이 공존한다."""
+
+    def test_monitor_with_bypass_records_suppression_no_block(self):
+        """monitor + 트랙실패(scriptError) + bypass: 미차단 + suppression 기록.
+        monitor 라 would_block 은 False 지만 bypass 우회 기록은 그대로 남는다."""
+        rc, dec = run_gate(pol=policy(enabled="monitor"), summ=summary(), sbom=True,
+                           env_extra={"CVE_TRACK_BYPASS": "1", "GITHUB_ACTOR": "tester"})
+        self.assertEqual(dec["cve_track"]["mode"], "monitor")
+        self.assertFalse(dec["blocked"]); self.assertEqual(rc, 0)
+        self.assertFalse(dec["cve_track"]["would_block"])
+        self.assertTrue(dec.get("suppression", {}).get("active"))
+        self.assertEqual(dec["suppression"]["actor"], "tester")
+
+    def test_monitor_track_failure_without_bypass_is_monitor_warning(self):
+        """monitor + 트랙실패 + bypass 없음: 차단 안 하고 fail-closed 사유를
+        '[monitor]' 경고로 기록, suppression 없음(=bypass 미적용)."""
+        rc, dec = run_gate(pol=policy(enabled="monitor"), summ=summary(), sbom=True)
+        self.assertEqual(dec["cve_track"]["mode"], "monitor")
+        self.assertFalse(dec["blocked"]); self.assertEqual(rc, 0)
+        self.assertFalse(dec["cve_track"]["would_block"])
+        self.assertNotIn("suppression", dec)
+        self.assertTrue(any("[monitor]" in w and "트랙 실패" in w for w in dec["warnings"]))
+
+
 class SeverityConstantsTests(unittest.TestCase):
     """severity.py 단일 출처 + '심각도 등급'과 '표시 우선순위' 두 축 분리 검증."""
 
