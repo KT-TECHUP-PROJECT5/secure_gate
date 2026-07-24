@@ -103,6 +103,20 @@ class ScannerNormalizationTests(unittest.TestCase):
             report["findings"][0]["location"],
         )
 
+    def test_dependency_track_upload_must_succeed(self):
+        succeeded = aggregate_results.normalize_report(
+            "dependency_track",
+            {"status": "succeeded", "reason": "bom-received"},
+        )
+        failed = aggregate_results.normalize_report(
+            "dependency_track",
+            {"status": "failed", "reason": "network-error"},
+        )
+
+        self.assertEqual("passed", succeeded["status"])
+        self.assertEqual("error", failed["status"])
+        self.assertTrue(failed["errors"])
+
     def test_unsupported_schema_is_a_report_error(self):
         report = aggregate_results.normalize_report("sast", {"unexpected": []})
 

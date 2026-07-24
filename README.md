@@ -160,7 +160,8 @@ Gate Status: ❌ FAILED
 5. Post-merge caller에는 `STAGING_URL`, `DYNATRACE_ENV_URL`,
    `DYNATRACE_PROBLEM_SELECTOR`, `DYNATRACE_ENTITY_SELECTOR`,
    `DYNATRACE_SERVICE_ENTITY_SELECTOR` Repository Variables와
-   `DYNATRACE_TOKEN` Repository Secret을 등록한다. 두 entity selector는
+   `DEPENDENCY_TRACK_URL`, `DEPENDENCY_TRACK_API_KEY`, `DYNATRACE_TOKEN`
+   Secrets를 등록한다. 두 entity selector는
    전체 서비스가 아닌 해당 애플리케이션으로 범위를 제한해야 한다.
 6. Branch Protection에서 Secure PR Gate Check를 Required로 설정한다.
 

@@ -85,8 +85,8 @@ COLLECTION   secure-gate/github/<owner>/<repo>            @ main   (합산 리�
 | `always` | ref와 무관하게 업로드 (디버그/임시) |
 | `never` | 업로드하지 않음 |
 
-PR Security Gate는 보통 `pull_request`로 돌므로, 기본값(`main-only`)이면 DT는 `not-main-branch`로 **skip**된다.
-main에 merge된 뒤 `push` to `main` workflow(또는 CD)에서 업로드하는 구성을 권장한다.
+PR 소프트 프로필은 caller에서 `never`를 사용하여 DT 업로드를 생략한다.
+Post-merge 하드 프로필은 `always`로 업로드하고 성공 여부를 Gate 필수 입력으로 검증한다.
 
 ## Secrets / Inputs
 
@@ -136,16 +136,14 @@ LAN에서 쓰려면 API가 `0.0.0.0:8080`으로 publish 되어야 한다 (`127.0
 
 ## Skip / 실패 정책
 
-| reason | 의미 | Job |
+| reason | PR 소프트 프로필 | Post-merge 하드 프로필 |
 | --- | --- | --- |
-| `not-configured` | URL/API Key/repository 부족 | 비차단 |
-| `secrets-unavailable` | repo는 있으나 secret 없음 (Fork 등) | 비차단 |
-| `not-main-branch` | main-only 정책에서 main push가 아님 | 비차단 |
-| `upload-disabled` | mode=never | 비차단 |
-| `bom-received` | 수신 성공 (`status=succeeded`) | 비차단 |
-| `http-*` / `network-error` | API/네트워크 실패 | 비차단 (`continue-on-error`) |
+| `upload-disabled` | 정상 skip | 사용하지 않음 |
+| `bom-received` | 해당 없음 | 성공 |
+| `not-configured` / `secrets-unavailable` | 해당 없음 | 차단 |
+| `http-*` / `network-error` | 해당 없음 | 차단 |
 
-Gate(Aggregator)는 DT report를 필수로 읽지 않는다.
+Post-merge Aggregator는 DT upload report를 필수로 읽고 `status=succeeded`만 통과시킨다.
 
 ## 산출물
 
@@ -175,7 +173,7 @@ Gate(Aggregator)는 DT report를 필수로 읽지 않는다.
 
 ## Caller 예시
 
-### 단일 앱 (PR Gate — DT는 기본 skip)
+### 단일 앱 (PR Gate — DT 업로드 안 함)
 
 ```yaml
 jobs:
@@ -184,7 +182,7 @@ jobs:
     with:
       gate_repository: KT-TECHUP-PROJECT5/secure_gate
       gate_ref: v1
-    secrets: inherit
+      dependency_track_upload_mode: never
 ```
 
 ### 모노레포 backend 이미지 → DT backend Project
@@ -198,7 +196,7 @@ with:
   dependency_track_upload_mode: main-only
 ```
 
-main push/CD에서 동일 input으로 올리면
+Post-merge caller에서 동일 input으로 올리면
 `secure-gate/github/<owner>/<repo>/backend @ main` 에 SBOM이 쌓인다.
 
 ## 운영 체크리스트

@@ -64,7 +64,8 @@ Secure PR Gate는 GitHub Actions **Reusable Workflow** 기반 DevSecOps 보안 �
 
 트리거: `workflow_call` (직접 실행되지 않음)
 
-Staging URL을 입력받아 Health Check, ZAP/Nuclei `post-merge` 프로필, Dynatrace 수집,
+Staging URL을 입력받아 Trivy CVE/SBOM 생성, Dependency-Track 업로드,
+Health Check, ZAP/Nuclei `post-merge` 프로필, Dynatrace 수집,
 필수 원본 보고서 검증 및 Policy Evaluator를 실행한다.
 
 ### 4. `cd-staging.yml` — 이 저장소용 수동 Staging 검증 Caller
@@ -87,8 +88,8 @@ DAST는 PR Gate와 Staging CD에서 목적이 다르다. `enable_dast=true`이�
 | 트리거 | `pull_request` | Staging 배포 성공 후 |
 | 환경 | runner-local 또는 `target_url` | 실제 Staging 배포 환경 |
 | 목적 | Merge 전 선택적·경량 동적 검사 | 배포 후 환경·헤더·프록시까지 포함한 재검증 |
-| 도구 | ZAP, Nuclei, 직접 보안 헤더 검사 | Health Check, Smoke Test, DAST |
-| 기본값 | `enable_dast: false` (선택) | ZAP/Nuclei/Dynatrace 필수 하드 프로필 |
+| 도구 | ZAP, Nuclei, 직접 보안 헤더 검사 | Trivy/SBOM/Dependency-Track, Health Check, Smoke Test, DAST |
+| 기본값 | `enable_dast: false` (선택), DT 업로드 안 함 | Dependency-Track/ZAP/Nuclei/Dynatrace 필수 하드 프로필 |
 | 결과 처리 | `runtime-report.json` → Aggregator → Policy Evaluator → Required Check | 배포 성공/중단·Rollback 판단 |
 
 PR 단계에서는 시간을 고려해 Baseline·제한 심각도 중심의 검사를 두고, 전체 검증은 Staging 배포 후에 수행하는 구성을 권장한다.
@@ -171,11 +172,12 @@ jobs:
 | Secret | 필수 | 설명 |
 | --- | --- | --- |
 | `GITHUB_TOKEN` | 자동 | PR 댓글용. 별도 전달 불필요 |
-| `DEPENDENCY_TRACK_URL` | 선택 | Dependency-Track **Backend API** base URL (UI 전용 주소 아님) |
-| `DEPENDENCY_TRACK_API_KEY` | 선택 | Dependency-Track API Key |
+| `DEPENDENCY_TRACK_URL` | Post-merge 필수 | Dependency-Track **Backend API** base URL (UI 전용 주소 아님) |
+| `DEPENDENCY_TRACK_API_KEY` | Post-merge 필수 | Dependency-Track API Key |
 | `DYNATRACE_TOKEN` | Post-merge 필수 | Post-merge Reusable Workflow에서 Problems와 Service entities 조회 |
 
-URL / API Key가 없으면 Dependency-Track 업로드만 skip한다. Trivy CVE Gate와 SBOM artifact는 계속 진행된다.
+PR에서는 Dependency-Track 업로드를 생략한다. Post-merge에서는 URL/API Key와
+SBOM 업로드 성공을 필수로 요구하며 실패 또는 skip 시 Gate를 차단한다.
 
 Dynatrace 연동값은 Post-merge caller가 Reusable Workflow에 전달한다.
 
@@ -247,9 +249,10 @@ Dependency-Track은 Gate 판정기가 아니라 **SBOM/SCA 추적 대시보드**
 운영 규칙·식별·모노레포·업로드 시기는 [`docs/dependency-track.md`](./dependency-track.md)를 본다.
 
 - 식별: `secure-gate/github/<owner>/<repo>[/<service>]` + version `main` (UUID input 없음, `autoCreate`)
-- 기본 업로드: **main push only** (`dependency_track_upload_mode: main-only`)
+- PR 소프트 프로필: 업로드하지 않음
+- Post-merge 하드 프로필: `always` 모드로 업로드하고 성공을 필수로 검증
 - `DEPENDENCY_TRACK_URL`은 Backend API base URL (UI 주소 아님)
-- 업로드 step만 `continue-on-error: true` (DT 실패가 Trivy Gate를 막지 않음)
+- Post-merge 업로드 실패 또는 skip은 기술 실패로 Gate를 차단
 - `succeeded` = BOM **수신** 성공 (분석 완료 보장 아님)
 
 ## 스크립트 checkout 방식

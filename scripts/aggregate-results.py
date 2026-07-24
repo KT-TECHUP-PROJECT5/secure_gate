@@ -34,6 +34,7 @@ REPORT_FILES = {
     "sast":               "sast-report.json",
     "secret_scan":        "secret-report.json",
     "dependency_scan":    "dependency-report.json",
+    "dependency_track":   "dependency-track-upload-report.json",
     "runtime_validation": "runtime-report.json",
 }
 
@@ -169,6 +170,18 @@ def normalize_trivy(data: dict) -> dict:
     }
 
 
+def normalize_dependency_track(data: dict) -> dict:
+    status = str(data.get("status") or "").lower()
+    reason = str(data.get("reason") or "unknown")
+    succeeded = status == "succeeded"
+    return {
+        "status": "passed" if succeeded else "error",
+        "tool": "dependency-track",
+        "findings": [],
+        "errors": [] if succeeded else [f"dependency-track-upload-{status}:{reason}"],
+    }
+
+
 def normalize_report(key: str, data: object) -> dict:
     if key == "sast" and isinstance(data, dict) and isinstance(data.get("results"), list):
         return normalize_semgrep(data)
@@ -181,6 +194,8 @@ def normalize_report(key: str, data: object) -> dict:
         and isinstance(data.get("Results"), list)
     ):
         return normalize_trivy(data)
+    if key == "dependency_track" and isinstance(data, dict):
+        return normalize_dependency_track(data)
     if isinstance(data, dict) and isinstance(data.get("findings"), list):
         return data
     return {

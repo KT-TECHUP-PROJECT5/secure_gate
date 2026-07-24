@@ -37,6 +37,26 @@ on:
         type: string
         required: false
         default: "none"
+      dockerfile_path:
+        description: Dockerfile path for the post-merge dependency scan
+        type: string
+        required: false
+        default: ""
+      docker_build_context:
+        description: Docker build context for the post-merge dependency scan
+        type: string
+        required: false
+        default: "."
+      dependency_track_service_name:
+        description: Optional Dependency-Track child service name
+        type: string
+        required: false
+        default: ""
+      dependency_track_project_version:
+        description: Dependency-Track project version
+        type: string
+        required: false
+        default: "main"
       dynatrace_environment_url:
         description: Dynatrace SaaS environment URL
         type: string
@@ -59,11 +79,145 @@ on:
         required: false
         default: ""
     secrets:
+      DEPENDENCY_TRACK_URL:
+        description: Dependency-Track base URL
+        required: true
+      DEPENDENCY_TRACK_API_KEY:
+        description: Dependency-Track API key
+        required: true
       DYNATRACE_TOKEN:
         description: Dynatrace token with problems.read and entities.read
         required: true
 
 jobs:
+  post-merge-dependency:
+    name: Post-merge Dependency Scan and SBOM Upload
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@v4
+
+      - name: Checkout Secure Gate tooling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.gate_repository }}
+          ref: ${{ inputs.gate_ref }}
+          path: .secure-gate
+
+      - name: Install Trivy
+        run: |
+          TRIVY_VERSION="0.70.0"
+          curl --fail --silent --show-error --location \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
+            --output /tmp/trivy.tar.gz
+          echo "8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9  /tmp/trivy.tar.gz" | sha256sum --check
+          tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
+          sudo install /tmp/trivy /usr/local/bin/trivy
+
+      - name: Resolve Dockerfile and scan mode
+        id: resolve-dockerfile
+        env:
+          INPUT_PATH: ${{ inputs.dockerfile_path }}
+          BUILD_CONTEXT: ${{ inputs.docker_build_context }}
+        run: |
+          set -euo pipefail
+          DOCKERFILE=""
+          if [ -n "$INPUT_PATH" ]; then
+            if [ ! -f "$INPUT_PATH" ]; then
+              echo "dockerfile_path was set but file not found: $INPUT_PATH" >&2
+              exit 1
+            fi
+            DOCKERFILE="$INPUT_PATH"
+          elif [ -f Dockerfile ]; then
+            DOCKERFILE="Dockerfile"
+          elif [ -f dockerfile ]; then
+            DOCKERFILE="dockerfile"
+          fi
+
+          MODE="fs"
+          if [ -n "$DOCKERFILE" ]; then
+            MODE="image"
+          fi
+          echo "dockerfile=$DOCKERFILE" >> "$GITHUB_OUTPUT"
+          echo "context=$BUILD_CONTEXT" >> "$GITHUB_OUTPUT"
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+
+      - name: Build image for Trivy
+        if: steps.resolve-dockerfile.outputs.mode == 'image'
+        run: |
+          docker build \
+            -f "${{ steps.resolve-dockerfile.outputs.dockerfile }}" \
+            -t "secure-gate-scan:${{ github.sha }}" \
+            "${{ steps.resolve-dockerfile.outputs.context }}"
+
+      - name: Generate Trivy CVE report and CycloneDX SBOM
+        env:
+          SCAN_MODE: ${{ steps.resolve-dockerfile.outputs.mode }}
+        run: |
+          set -euo pipefail
+          mkdir -p security/reports
+          if [ "$SCAN_MODE" = "image" ]; then
+            TARGET="secure-gate-scan:${{ github.sha }}"
+            trivy image --scanners vuln --format json \
+              --output security/reports/dependency-report.json \
+              --exit-code 0 --no-progress "$TARGET"
+            trivy image --format cyclonedx \
+              --output security/reports/sbom.cdx.json \
+              --no-progress "$TARGET"
+          else
+            trivy fs --scanners vuln \
+              --file-patterns "pip:requirements-legacy.txt" \
+              --format json \
+              --output security/reports/dependency-report.json \
+              --exit-code 0 --no-progress .
+            trivy fs \
+              --file-patterns "pip:requirements-legacy.txt" \
+              --format cyclonedx \
+              --output security/reports/sbom.cdx.json \
+              --no-progress .
+          fi
+
+      - name: Validate dependency reports
+        run: |
+          python3 .secure-gate/scripts/pin-cyclonedx-specversion.py \
+            --sbom security/reports/sbom.cdx.json \
+            --spec-version 1.6
+          python3 -c 'import json; d=json.load(open("security/reports/dependency-report.json")); assert d.get("SchemaVersion") == 2'
+          python3 -c 'import json; d=json.load(open("security/reports/sbom.cdx.json")); assert d.get("bomFormat") == "CycloneDX" and d.get("specVersion") == "1.6"'
+
+      - name: Upload SBOM to Dependency-Track
+        env:
+          DEPENDENCY_TRACK_URL: ${{ secrets.DEPENDENCY_TRACK_URL }}
+          DEPENDENCY_TRACK_API_KEY: ${{ secrets.DEPENDENCY_TRACK_API_KEY }}
+        run: |
+          python3 .secure-gate/scripts/upload-sbom-to-dependency-track.py \
+            --sbom security/reports/sbom.cdx.json \
+            --repository "${{ github.repository }}" \
+            --service-name "${{ inputs.dependency_track_service_name }}" \
+            --project-version "${{ inputs.dependency_track_project_version }}" \
+            --upload-mode always \
+            --report security/reports/dependency-track-upload-report.json
+
+      - name: Ensure Dependency-Track upload report
+        if: always()
+        run: |
+          REPORT="security/reports/dependency-track-upload-report.json"
+          if [ ! -f "$REPORT" ]; then
+            mkdir -p security/reports
+            python3 -c 'import json,pathlib; p=pathlib.Path("security/reports/dependency-track-upload-report.json"); p.write_text(json.dumps({"status":"failed","reason":"report-missing","tool":"dependency-track","target":"bom-upload"}, indent=2)+"\n")'
+          fi
+
+      - name: Upload post-merge dependency reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-merge-dependency-reports
+          path: |
+            security/reports/dependency-report.json
+            security/reports/sbom.cdx.json
+            security/reports/dependency-track-upload-report.json
+          if-no-files-found: warn
+
   post-merge-runtime:
     name: Post-merge Runtime Validation
     runs-on: ubuntu-latest
@@ -200,15 +354,63 @@ jobs:
             --output security/reports/runtime-report.json \
             --fail-on-failed
 
-      - name: Aggregate post-merge results
+      - name: Upload post-merge runtime reports
         if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-merge-runtime-reports
+          path: |
+            security/reports/zap-report.json
+            security/reports/nuclei-report.jsonl
+            security/reports/nuclei-cve-coverage.json
+            security/reports/nuclei-cve-ids.txt
+            security/reports/nuclei-cve-matched-templates.txt
+            security/reports/dynatrace-problems.json
+            security/reports/runtime-report.json
+          if-no-files-found: warn
+
+  aggregate-and-gate:
+    name: Aggregate and Enforce Post-merge Gate
+    if: always()
+    needs:
+      - post-merge-dependency
+      - post-merge-runtime
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@v4
+
+      - name: Checkout Secure Gate tooling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.gate_repository }}
+          ref: ${{ inputs.gate_ref }}
+          path: .secure-gate
+
+      - name: Prepare aggregate report directory
+        run: mkdir -p security/reports
+
+      - name: Download post-merge dependency reports
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: post-merge-dependency-reports
+          path: security/reports
+
+      - name: Download post-merge runtime reports
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: post-merge-runtime-reports
+          path: security/reports
+
+      - name: Aggregate post-merge results
         run: |
           python3 .secure-gate/scripts/aggregate-results.py \
-            --reports runtime_validation
+            --reports dependency_scan,dependency_track,runtime_validation
 
       - name: Resolve policy file
         id: policy
-        if: always()
         env:
           CALLER_POLICY: ${{ inputs.policy_path }}
         run: |
@@ -222,23 +424,19 @@ jobs:
           fi
 
       - name: Evaluate post-merge policy
-        if: always()
         env:
           SECURE_GATE_POLICY: ${{ steps.policy.outputs.path }}
         run: python3 .secure-gate/scripts/evaluate-gate.py
 
-      - name: Upload post-merge validation reports
+      - name: Upload post-merge gate results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: post-merge-runtime-reports
+          name: post-merge-gate-results
           path: |
-            security/reports/zap-report.json
-            security/reports/nuclei-report.jsonl
-            security/reports/nuclei-cve-coverage.json
-            security/reports/nuclei-cve-ids.txt
-            security/reports/nuclei-cve-matched-templates.txt
-            security/reports/dynatrace-problems.json
+            security/reports/dependency-report.json
+            security/reports/sbom.cdx.json
+            security/reports/dependency-track-upload-report.json
             security/reports/runtime-report.json
             security/reports/security-summary.json
             security/reports/gate-decision.json

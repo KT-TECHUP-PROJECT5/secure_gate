@@ -51,7 +51,11 @@ PR Gate는 다음 보고서를 필수 입력으로 사용한다.
 - `dependency-report.json`
 - `runtime-report.json`
 
-Post-merge Gate는 `runtime-report.json`만 Aggregator의 직접 입력으로 사용한다.
+Post-merge Gate는 다음 보고서를 Aggregator의 직접 입력으로 사용한다.
+
+- `dependency-report.json`
+- `dependency-track-upload-report.json`
+- `runtime-report.json`
 
 Post-merge의 `runtime-report.json`은 내부적으로 다음 원본 보고서의 존재와 결과를 검증한다.
 
@@ -60,7 +64,9 @@ Post-merge의 `runtime-report.json`은 내부적으로 다음 원본 보고서�
 - `nuclei-cve-coverage.json`
 - `dynatrace-problems.json`
 
-SBOM과 Dependency-Track 업로드 결과는 현재 Gate 판단에 사용하지 않는다.
+PR에서는 SBOM을 Artifact로만 보존하고 Dependency-Track 업로드를 수행하지 않는다.
+Post-merge에서는 CycloneDX SBOM을 Dependency-Track에 업로드하며, 업로드 실패나
+skip을 기술 실패로 처리한다.
 
 ## 4. 공통 finding 형식
 
@@ -188,9 +194,9 @@ Policy Evaluator의 실제 판단:
 
 이 경우 Summary의 `has_error`가 `true`가 되고 Gate는 Block된다.
 
-Dependency-Track 업로드 실패는 예외다.
-Dependency-Track은 현재 추적 대시보드이며 Gate 판정기가 아니므로
-SBOM 업로드 실패만으로 PR Gate를 차단하지 않는다.
+PR에서는 Dependency-Track 업로드를 수행하지 않으므로 업로드 결과를 Gate에 포함하지 않는다.
+Post-merge에서는 SBOM 추적이 하드 프로필의 필수 단계이므로 Dependency-Track 업로드
+실패 또는 skip을 기술 실패로 처리하여 Gate를 차단한다.
 
 ## 8. PR과 Post-merge 차이
 
@@ -207,7 +213,9 @@ SBOM 업로드 실패만으로 PR Gate를 차단하지 않는다.
 - ZAP Full Scan과 확대된 Nuclei 프로필 사용
 - Dynatrace Problems 및 해당 애플리케이션 Service entity 확인
 - ZAP/Nuclei/Coverage/Dynatrace 보고서를 모두 필수로 요구
-- `runtime-report.json`을 집계하여 다음 환경 승격 여부 판단
+- Trivy CVE 보고서와 CycloneDX SBOM 생성
+- Dependency-Track SBOM 업로드 성공을 필수로 요구
+- Dependency/Dependency-Track/Runtime 보고서를 집계하여 다음 환경 승격 여부 판단
 
 현재 PR과 Post-merge의 심각도 차단 기준은 동일하다.
 검사 강도와 필수 보고서 범위만 다르다.
