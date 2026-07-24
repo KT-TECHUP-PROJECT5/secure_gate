@@ -1,5 +1,5 @@
 {
-  "version": "2.0",
+  "version": "2.1",
   "severityMapping": {
     "semgrep": {
       "ERROR": "high",
@@ -21,17 +21,67 @@
       "Medium": "medium",
       "Low": "low",
       "Informational": "low"
+    },
+    "runtime-validation": {
+      "critical": "critical",
+      "high": "high",
+      "medium": "medium",
+      "low": "low",
+      "info": "low",
+      "informational": "low",
+      "unknown": "medium"
     }
   },
   "toolCategoryMap": {
     "semgrep": "sast",
     "gitleaks": "secret",
     "trivy": "dependency",
-    "zap": "dast"
+    "zap": "dast",
+    "runtime-validation": "dast"
   },
   "gateRules": {
     "blockOnSeverity": ["critical", "high", "secret"],
     "warnOnSeverity": ["medium"]
   },
-  "unknownSeverityFallback": "medium"
+  "unknownSeverityFallback": "medium",
+  "cveTrack": {
+    "enabled": "monitor",
+    "decisionFile": "security/reports/cve-policy-decision.json",
+    "statusFile": "security/reports/cve-track-status.json",
+    "runner": {
+      "runnerId": "cve-policy-evaluate",
+      "allowSelfInvoke": true
+    },
+    "timeoutSeconds": 120,
+    "onTrackFailure": {
+      "scriptError": "failClosed",
+      "dataUnavailable": "failOpen",
+      "timeout": "failOpen"
+    },
+    "metricGapHandling": "delegateToCveTrack",
+    "bypass": {
+      "enabled": true,
+      "signalEnv": "CVE_TRACK_BYPASS",
+      "scope": "trackFailureOnly"
+    },
+    "adjustment": {
+      "annotateOnly": true,
+      "promote": { "kev": true },
+      "demote": {
+        "requireNotKev": true,
+        "maxEpss": 0.1,
+        "minSeverity": "high",
+        "demoteOnlyWhenNoFix": true,
+        "neverDemoteAtOrAboveCvss": 9.0
+      }
+    }
+  },
+  "decisionMerge": {
+    "strategy": "fail-closed",
+    "cveVerdictActions": {
+      "block": "block",
+      "warn": "warn",
+      "pass": "pass"
+    }
+  }
 }

@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gatekeepers.secure-gate/policy-schema.json",
+  "title": "Secure Gate Policy",
+  "description": "security-gate-policy.json 검증 스키마. evaluate-gate.py가 시작 시 이 스키마를 파싱해 required/type/enum을 해석하며(규칙 하드코딩 금지), 검증 실패 시 fail-closed로 차단한다.",
+  "type": "object",
+  "required": [
+    "version",
+    "severityMapping",
+    "toolCategoryMap",
+    "gateRules",
+    "unknownSeverityFallback",
+    "cveTrack",
+    "decisionMerge"
+  ],
+  "properties": {
+    "version": { "type": "string" },
+    "severityMapping": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": { "type": "string" }
+      }
+    },
+    "toolCategoryMap": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "gateRules": {
+      "type": "object",
+      "required": ["blockOnSeverity", "warnOnSeverity"],
+      "properties": {
+        "blockOnSeverity": { "type": "array", "items": { "type": "string" } },
+        "warnOnSeverity": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "unknownSeverityFallback": {
+      "type": "string",
+      "enum": ["critical", "high", "medium", "low", "secret"]
+    },
+    "cveTrack": {
+      "type": "object",
+      "$comment": "allowSelfInvoke:false 전환 시 composite action 계약 — evaluate-gate 실행 이전에 decisionFile 경로에 cve-policy-decision.json 스키마 준수 산출물(필수 키: total_cves, block_count, warn_count, package_failures, cves, policy_version)을 생성해야 한다. 미생성 시 dataUnavailable로 분류되어 onTrackFailure 정책이 적용된다. allowSelfInvoke:false면 evaluate-gate는 runner를 호출하지 않는다(신뢰 경계).",
+      "required": [
+        "enabled",
+        "decisionFile",
+        "runner",
+        "onTrackFailure",
+        "metricGapHandling",
+        "bypass"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "string",
+          "enum": ["enforce", "monitor", "off"],
+          "description": "off=병합 스킵 / monitor=실행·기록하되 blocked 미반영(dry-run) / enforce=차단."
+        },
+        "decisionFile": { "type": "string" },
+        "statusFile": { "type": "string" },
+        "runner": {
+          "type": "object",
+          "required": ["runnerId", "allowSelfInvoke"],
+          "properties": {
+            "runnerId": { "type": "string" },
+            "allowSelfInvoke": { "type": "boolean" }
+          }
+        },
+        "timeoutSeconds": { "type": "integer" },
+        "onTrackFailure": {
+          "type": "object",
+          "required": ["scriptError", "dataUnavailable", "timeout"],
+          "properties": {
+            "scriptError": { "type": "string", "enum": ["failClosed", "failOpen"] },
+            "dataUnavailable": { "type": "string", "enum": ["failClosed", "failOpen"] },
+            "timeout": { "type": "string", "enum": ["failClosed", "failOpen"] }
+          }
+        },
+        "metricGapHandling": {
+          "type": "string",
+          "enum": ["delegateToCveTrack", "overrideFailClosed"],
+          "description": "delegateToCveTrack=EPSS/CVSS 결측 처리를 CVE 트랙(cve-policy.json)에 위임, 게이트는 verdict 신뢰. overrideFailClosed(예약)=게이트가 결측 CVE를 block으로 강제."
+        },
+        "bypass": {
+          "type": "object",
+          "$comment": "scope=trackFailureOnly는 트랙 '실패'의 fail-closed만 fail-open으로 강등한다. 유효한 CVE block verdict은 절대 우회하지 못한다(게이트 무력화 방지).",
+          "required": ["enabled", "signalEnv", "scope"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "signalEnv": { "type": "string" },
+            "scope": { "type": "string", "enum": ["trackFailureOnly"] }
+          }
+        },
+        "adjustment": {
+          "type": "object",
+          "$comment": "보정 레이어. Trivy 판정을 promote(KEV)/demote(저위험)/keep 한다. 추가 차단 레이어가 아님. 매칭 키((purl,CVE))·정규화는 코드 소유(신뢰 경계). demote는 안전상 다중 조건 AND. neverDemoteAtOrAboveCvss 는 CVSS 등급 밴드(critical=9.0/high=7.0) 기준으로 평가. 상세: docs/cve-track-integration.md",
+          "properties": {
+            "annotateOnly": { "type": "boolean", "description": "true면 승격/강등을 표시만 하고 판정은 안 바꿈(초기 운영 기본값)." },
+            "promote": {
+              "type": "object",
+              "properties": {
+                "kev": { "type": "boolean", "description": "KEV 등재 → severity 무관 block." }
+              }
+            },
+            "demote": {
+              "type": "object",
+              "properties": {
+                "requireNotKev": { "type": "boolean" },
+                "maxEpss": { "type": "number" },
+                "minSeverity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+                "demoteOnlyWhenNoFix": { "type": "boolean", "description": "true면 fix 없을 때만 강등(못 고치는 저위험의 차단 마찰 제거)." },
+                "neverDemoteAtOrAboveCvss": { "type": "number", "description": "이 CVSS 밴드 하한 이상이면 강등 금지(예: 9.0=critical 강등 금지)." }
+              }
+            }
+          }
+        }
+      }
+    },
+    "decisionMerge": {
+      "type": "object",
+      "required": ["strategy", "cveVerdictActions"],
+      "properties": {
+        "strategy": { "type": "string", "enum": ["fail-closed"] },
+        "cveVerdictActions": {
+          "type": "object",
+          "$comment": "non-dependency(SAST/secret/DAST) 카테고리의 CVE verdict→action 매핑용으로만 예약. 의존성 CVE는 cveTrack.adjustment(promote/demote/keep)가 담당하며 여기서 처리하지 않는다(additive 이중 차단 방지).",
+          "required": ["block", "warn", "pass"],
+          "properties": {
+            "block": { "type": "string", "enum": ["block", "warn", "pass"] },
+            "warn": { "type": "string", "enum": ["block", "warn", "pass"] },
+            "pass": { "type": "string", "enum": ["block", "warn", "pass"] }
+          }
+        }
+      }
+    }
+  }
+}
