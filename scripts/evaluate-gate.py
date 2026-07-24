@@ -31,6 +31,8 @@ from pathlib import Path
 TOOLING_ROOT     = Path(__file__).resolve().parent.parent
 TOOLING_POLICIES = TOOLING_ROOT / "security" / "policies"
 TOOLING_SCRIPTS  = TOOLING_ROOT / "scripts"
+sys.path.insert(0, str(TOOLING_SCRIPTS))
+from severity import SEVERITY_RANK as SEV_RANK, CVSS_BAND_FLOOR
 
 # ── 리포트 산출물: caller cwd 기준 ──
 REPORTS_DIR   = Path("security/reports")
@@ -63,9 +65,7 @@ SEVERITY_LABELS = {
     "secret":   "Secret",
 }
 
-# CVSS v3 등급 밴드 하한 (neverDemoteAtOrAboveCvss 가드용)
-CVSS_BAND_FLOOR = {"critical": 9.0, "high": 7.0, "medium": 4.0, "low": 0.1}
-SEV_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "secret": 0}
+# SEV_RANK · CVSS_BAND_FLOOR 는 scripts/severity.py 단일 출처에서 import.
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -527,6 +527,12 @@ def _decide_adjustment(f, ev, adj_cfg):
     promote = adj_cfg.get("promote", {})
     demote = adj_cfg.get("demote", {})
     sev = f.get("severity")
+
+    # secret 은 CVSS/EPSS 축이 없어 CVE 보정(promote/demote) 대상이 아니다.
+    # 정상 경로에선 category!=dependency 로 이미 걸러지지만, 등급 순위(SEVERITY_RANK)
+    # 에서 secret 을 뺀 만큼 minSeverity 비교의 우연한 제외에 기대지 않고 명시 제외.
+    if sev == "secret":
+        return "keep", "", None
 
     # PROMOTE: KEV → severity 무관 block
     if promote.get("kev") and ev["kev"]:

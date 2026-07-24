@@ -18,6 +18,9 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from severity import display_key
+
 DECISION_FILE = Path("security/reports/gate-decision.json")
 
 TOOL_LABELS = {
@@ -55,9 +58,6 @@ def report_row(label: str, report: dict) -> str:
 # 넘지 않도록, 같은 카테고리는 가이드를 한 번만 쓰고 위치는 이만큼만 보여준다.
 MAX_LOCATIONS_PER_GROUP = 10
 
-# 그룹 내 위치를 심각도 높은 순으로 정렬하기 위한 순위.
-SEVERITY_RANK = {"critical": 0, "high": 1, "secret": 2, "medium": 3, "low": 4}
-
 
 def _severity_display(finding: dict) -> str:
     sev = (finding.get("severity") or "").capitalize()
@@ -87,10 +87,8 @@ def guide_group_block(findings: list, blocking: bool) -> str:
     if guide.get("reference"):
         lines.append(f"- 참고: {guide['reference']}")
 
-    ordered = sorted(
-        findings,
-        key=lambda f: SEVERITY_RANK.get(f.get("severity"), len(SEVERITY_RANK)),
-    )
+    # 표시 우선순위(DISPLAY_ORDER): secret 최상단, 그다음 심각도 등급순.
+    ordered = sorted(findings, key=lambda f: display_key(f.get("severity")))
     shown = ordered[:MAX_LOCATIONS_PER_GROUP]
 
     lines.append("- 해당 위치:")

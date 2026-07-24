@@ -531,5 +531,41 @@ class ProfileTests(unittest.TestCase):
         self.assertTrue(dec["blocked"]); self.assertEqual(rc, 1)
 
 
+class SeverityConstantsTests(unittest.TestCase):
+    """severity.py 단일 출처 + '심각도 등급'과 '표시 우선순위' 두 축 분리 검증."""
+
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("evaluate_gate_sev", EG_PATH)
+        cls.eg = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.eg)          # import severity → sys.modules
+        cls.sev = sys.modules["severity"]
+
+    def test_severity_rank_excludes_secret(self):
+        """SEVERITY_RANK 은 순수 CVSS 등급만 — secret 키 없음(0으로 끼우지 않음)."""
+        self.assertNotIn("secret", self.sev.SEVERITY_RANK)
+        self.assertEqual(set(self.sev.SEVERITY_RANK),
+                         {"critical", "high", "medium", "low"})
+
+    def test_gate_imports_shared_rank(self):
+        """evaluate-gate 의 SEV_RANK 는 severity.py 를 import 한 동일 객체(단일 출처)."""
+        self.assertIs(self.eg.SEV_RANK, self.sev.SEVERITY_RANK)
+        self.assertIs(self.eg.CVSS_BAND_FLOOR, self.sev.CVSS_BAND_FLOOR)
+
+    def test_display_order_secret_first_unknown_last(self):
+        """표시 우선순위(등급과 별개 축): secret 최상단, 미지정 등급은 맨 뒤."""
+        self.assertEqual(self.sev.display_key("secret"), 0)
+        self.assertLess(self.sev.display_key("secret"), self.sev.display_key("critical"))
+        self.assertLess(self.sev.display_key("critical"), self.sev.display_key("low"))
+        self.assertEqual(self.sev.display_key("nonsense"), len(self.sev.DISPLAY_ORDER))
+
+    def test_secret_finding_not_adjusted(self):
+        """_decide_adjustment: secret severity → keep(보정 대상 아님, 명시 제외)."""
+        f = {"severity": "secret", "blocking": True, "id": "S1"}
+        ev = {"kev": False, "epss": None, "severity": "high"}
+        adj = {"promote": {"kev": True}, "demote": {"minSeverity": "high"}}
+        self.assertEqual(self.eg._decide_adjustment(f, ev, adj), ("keep", "", None))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
