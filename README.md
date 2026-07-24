@@ -150,13 +150,16 @@ Gate Status: ❌ FAILED
 
 ## 다른 프로젝트에서 사용하기
 
-1. [examples/caller-security-gate.yml](examples/caller-security-gate.yml)을  
+1. PR 검사용 [examples/caller-security-gate.yml](examples/caller-security-gate.yml)을
    `.github/workflows/security-gate.yml`로 복사한다.
-2. `uses:` 경로의 태그를 `@v1`(또는 `@v1.0.0`)로 맞춘다.
-3. (선택) PR 단계 DAST를 쓰려면 `enable_dast: true`와 `install_command` / `build_command` / `start_command`를 설정한다.  
-   EC2는 필수가 아니다. runner에서 앱을 띄운 뒤 localhost 대상으로 검사한다.  
-   Staging 배포 후 DAST는 `cd-staging.yml`의 Post-deploy Validation에서 별도로 수행한다.
-4. Branch Protection에서 Secure PR Gate Check를 Required로 설정한다.
+2. Post-merge 검사용 [examples/caller-post-merge-security-gate.yml](examples/caller-post-merge-security-gate.yml)을
+   `.github/workflows/post-merge-security-gate.yml`로 복사한다.
+3. `uses:` 경로의 태그를 `@v1`(또는 `@v1.0.0`)로 맞춘다.
+4. (선택) PR 단계 DAST를 쓰려면 `enable_dast: true`와 `install_command` / `build_command` / `start_command`를 설정한다.
+   EC2는 필수가 아니다. runner에서 앱을 띄운 뒤 localhost 대상으로 검사한다.
+5. Post-merge caller에는 `STAGING_URL`, `DYNATRACE_ENV_URL` Repository Variables와
+   `DYNATRACE_TOKEN` Repository Secret을 등록한다.
+6. Branch Protection에서 Secure PR Gate Check를 Required로 설정한다.
 
 자세한 연동·inputs·버전 배포·PR/CD DAST 구분은 [docs/pipeline-guide.md](docs/pipeline-guide.md)를 참고한다.
 

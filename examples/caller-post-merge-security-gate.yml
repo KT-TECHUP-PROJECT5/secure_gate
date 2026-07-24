@@ -1,0 +1,25 @@
+name: Post-merge Security Gate
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  post-merge-security-gate:
+    uses: KT-TECHUP-PROJECT5/secure_gate/.github/workflows/post-merge-security-gate.yml@v1
+    with:
+      gate_repository: KT-TECHUP-PROJECT5/secure_gate
+      gate_ref: v1
+      target_url: ${{ vars.STAGING_URL }}
+      health_path: ${{ vars.HEALTH_CHECK_PATH || '/health' }}
+      smoke_paths: ${{ vars.SMOKE_TEST_PATHS || '/' }}
+      dynatrace_environment_url: ${{ vars.DYNATRACE_ENV_URL }}
+      dynatrace_problem_selector: ${{ vars.DYNATRACE_PROBLEM_SELECTOR || 'status("open")' }}
+      dynatrace_service_entity_selector: ${{ vars.DYNATRACE_SERVICE_ENTITY_SELECTOR || 'type("SERVICE")' }}
+    secrets:
+      DYNATRACE_TOKEN: ${{ secrets.DYNATRACE_TOKEN }}

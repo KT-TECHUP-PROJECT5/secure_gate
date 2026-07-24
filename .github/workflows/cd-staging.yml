@@ -45,99 +45,13 @@ jobs:
   # ──────────────────────────────────────────
   post-deploy-validation:
     name: Post-deploy Validation
-    runs-on: ubuntu-latest
     needs: staging-deploy
-    env:
-      STAGING_URL: ${{ vars.STAGING_URL }}
-      DYNATRACE_ENV_URL: ${{ vars.DYNATRACE_ENV_URL }}
-      HEALTH_CHECK_PATH: ${{ vars.HEALTH_CHECK_PATH || '/posts' }}
-    steps:
-      - name: Checkout Secure Gate
-        uses: actions/checkout@v4
-
-      - name: Validate post-merge configuration
-        run: |
-          set -euo pipefail
-          if [ -z "$STAGING_URL" ]; then
-            echo "Repository variable STAGING_URL is required" >&2
-            exit 1
-          fi
-          if [ -z "$DYNATRACE_ENV_URL" ]; then
-            echo "Repository variable DYNATRACE_ENV_URL is required" >&2
-            exit 1
-          fi
-
-      - name: Verify staging health
-        run: |
-          set -euo pipefail
-          HEALTH_URL="${STAGING_URL%/}${HEALTH_CHECK_PATH}"
-          for i in $(seq 1 30); do
-            if curl --fail --silent --show-error "$HEALTH_URL" >/dev/null; then
-              echo "Staging is healthy: ${HEALTH_URL}"
-              exit 0
-            fi
-            sleep 10
-          done
-          echo "Staging did not become healthy: ${HEALTH_URL}" >&2
-          exit 1
-
-      - name: Run ZAP post-merge validation
-        run: |
-          python3 scripts/run-zap-validation.py \
-            --profile post-merge \
-            --target-url "$STAGING_URL" \
-            --reports-dir security/reports
-
-      - name: Run Nuclei post-merge validation
-        run: |
-          python3 scripts/run-nuclei-validation.py \
-            --profile post-merge \
-            --target-url "$STAGING_URL" \
-            --reports-dir security/reports
-
-      - name: Fetch Dynatrace runtime results
-        env:
-          DYNATRACE_API_TOKEN: ${{ secrets.DYNATRACE_TOKEN }}
-        run: |
-          python3 scripts/fetch-dynatrace-problems.py \
-            --environment-url "$DYNATRACE_ENV_URL" \
-            --output security/reports/dynatrace-problems.json
-
-      - name: Generate and enforce runtime validation report
-        if: always()
-        env:
-          RUNTIME_REQUIRED_REPORTS: zap,nuclei,nuclei-coverage,dynatrace
-        run: |
-          python3 scripts/runtime-validation.py \
-            --base-url "$STAGING_URL" \
-            --health-path "$HEALTH_CHECK_PATH" \
-            --required-reports "$RUNTIME_REQUIRED_REPORTS" \
-            --output security/reports/runtime-report.json \
-            --fail-on-failed
-
-      - name: Aggregate post-merge results
-        if: always()
-        run: python3 scripts/aggregate-results.py
-
-      - name: Evaluate post-merge policy
-        if: always()
-        env:
-          SECURE_GATE_POLICY: security/policies/security-gate-policy.json
-        run: python3 scripts/evaluate-gate.py
-
-      - name: Upload post-merge validation reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: post-merge-runtime-reports
-          path: |
-            security/reports/zap-report.json
-            security/reports/nuclei-report.jsonl
-            security/reports/nuclei-cve-coverage.json
-            security/reports/nuclei-cve-ids.txt
-            security/reports/nuclei-cve-matched-templates.txt
-            security/reports/dynatrace-problems.json
-            security/reports/runtime-report.json
-            security/reports/security-summary.json
-            security/reports/gate-decision.json
-          if-no-files-found: warn
+    uses: ./.github/workflows/post-merge-security-gate.yml
+    with:
+      gate_repository: ${{ github.repository }}
+      gate_ref: ${{ github.sha }}
+      target_url: ${{ vars.STAGING_URL }}
+      health_path: /posts
+      smoke_paths: /login=200,/posts=200,/upload=200|303,/docs=200,/redoc=200
+      dynatrace_environment_url: ${{ vars.DYNATRACE_ENV_URL }}
+    secrets: inherit

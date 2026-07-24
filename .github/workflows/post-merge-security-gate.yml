@@ -1,0 +1,198 @@
+name: Post-merge Security Gate
+
+on:
+  workflow_call:
+    inputs:
+      gate_repository:
+        description: Secure Gate tooling repository
+        type: string
+        required: false
+        default: "KT-TECHUP-PROJECT5/secure_gate"
+      gate_ref:
+        description: Secure Gate tooling ref
+        type: string
+        required: false
+        default: "v1"
+      target_url:
+        description: Deployed staging URL to validate
+        type: string
+        required: true
+      health_path:
+        description: Health endpoint path
+        type: string
+        required: false
+        default: "/health"
+      smoke_paths:
+        description: Comma-separated smoke paths with optional expected status
+        type: string
+        required: false
+        default: "/"
+      required_headers:
+        description: Required response headers, or none to disable
+        type: string
+        required: false
+        default: "x-content-type-options,x-frame-options,content-security-policy"
+      custom_checks:
+        description: Runtime custom checks, or none to disable
+        type: string
+        required: false
+        default: "debug-exposure,docs-exposure,reflected-xss,search-sqli,admin-access,idor"
+      dynatrace_environment_url:
+        description: Dynatrace SaaS environment URL
+        type: string
+        required: true
+      dynatrace_problem_selector:
+        description: Dynatrace Problems API selector
+        type: string
+        required: false
+        default: 'status("open")'
+      dynatrace_service_entity_selector:
+        description: Dynatrace service entity selector
+        type: string
+        required: false
+        default: 'type("SERVICE")'
+      policy_path:
+        description: Policy path in caller repository; empty uses Secure Gate default
+        type: string
+        required: false
+        default: ""
+    secrets:
+      DYNATRACE_TOKEN:
+        description: Dynatrace token with problems.read and entities.read
+        required: true
+
+jobs:
+  post-merge-runtime:
+    name: Post-merge Runtime Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@v4
+
+      - name: Checkout Secure Gate tooling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.gate_repository }}
+          ref: ${{ inputs.gate_ref }}
+          path: .secure-gate
+
+      - name: Prepare runtime reports
+        run: |
+          set -euo pipefail
+          mkdir -p security/reports
+          rm -f \
+            security/reports/zap-report.json \
+            security/reports/nuclei-report.jsonl \
+            security/reports/nuclei-cve-coverage.json \
+            security/reports/nuclei-cve-ids.txt \
+            security/reports/nuclei-cve-matched-templates.txt \
+            security/reports/dynatrace-problems.json \
+            security/reports/runtime-report.json \
+            security/reports/security-summary.json \
+            security/reports/gate-decision.json
+
+      - name: Verify staging health
+        env:
+          TARGET_URL: ${{ inputs.target_url }}
+          HEALTH_PATH: ${{ inputs.health_path }}
+        run: |
+          set -euo pipefail
+          HEALTH_URL="${TARGET_URL%/}${HEALTH_PATH}"
+          for i in $(seq 1 30); do
+            if curl --fail --silent --show-error "$HEALTH_URL" >/dev/null; then
+              echo "Staging is healthy: ${HEALTH_URL}"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Staging did not become healthy: ${HEALTH_URL}" >&2
+          exit 1
+
+      - name: Run ZAP post-merge validation
+        env:
+          TARGET_URL: ${{ inputs.target_url }}
+        run: |
+          python3 .secure-gate/scripts/run-zap-validation.py \
+            --profile post-merge \
+            --target-url "$TARGET_URL" \
+            --reports-dir security/reports
+
+      - name: Run Nuclei post-merge validation
+        env:
+          TARGET_URL: ${{ inputs.target_url }}
+        run: |
+          python3 .secure-gate/scripts/run-nuclei-validation.py \
+            --profile post-merge \
+            --target-url "$TARGET_URL" \
+            --reports-dir security/reports
+
+      - name: Fetch Dynatrace runtime results
+        env:
+          DYNATRACE_API_TOKEN: ${{ secrets.DYNATRACE_TOKEN }}
+          DYNATRACE_ENV_URL: ${{ inputs.dynatrace_environment_url }}
+          DYNATRACE_PROBLEM_SELECTOR: ${{ inputs.dynatrace_problem_selector }}
+          DYNATRACE_SERVICE_ENTITY_SELECTOR: ${{ inputs.dynatrace_service_entity_selector }}
+        run: |
+          python3 .secure-gate/scripts/fetch-dynatrace-problems.py \
+            --output security/reports/dynatrace-problems.json
+
+      - name: Generate and enforce runtime validation report
+        if: always()
+        env:
+          TARGET_URL: ${{ inputs.target_url }}
+          HEALTH_PATH: ${{ inputs.health_path }}
+          SMOKE_PATHS: ${{ inputs.smoke_paths }}
+          REQUIRED_HEADERS: ${{ inputs.required_headers }}
+          CUSTOM_CHECKS: ${{ inputs.custom_checks }}
+        run: |
+          python3 .secure-gate/scripts/runtime-validation.py \
+            --base-url "$TARGET_URL" \
+            --health-path "$HEALTH_PATH" \
+            --smoke-paths "$SMOKE_PATHS" \
+            --required-headers "$REQUIRED_HEADERS" \
+            --custom-checks "$CUSTOM_CHECKS" \
+            --required-reports "zap,nuclei,nuclei-coverage,dynatrace" \
+            --output security/reports/runtime-report.json \
+            --fail-on-failed
+
+      - name: Aggregate post-merge results
+        if: always()
+        run: python3 .secure-gate/scripts/aggregate-results.py
+
+      - name: Resolve policy file
+        id: policy
+        if: always()
+        env:
+          CALLER_POLICY: ${{ inputs.policy_path }}
+        run: |
+          set -euo pipefail
+          if [ -n "$CALLER_POLICY" ] && [ -f "$CALLER_POLICY" ]; then
+            echo "path=${CALLER_POLICY}" >> "$GITHUB_OUTPUT"
+          elif [ -f "security/policies/security-gate-policy.json" ]; then
+            echo "path=security/policies/security-gate-policy.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=.secure-gate/security/policies/security-gate-policy.json" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Evaluate post-merge policy
+        if: always()
+        env:
+          SECURE_GATE_POLICY: ${{ steps.policy.outputs.path }}
+        run: python3 .secure-gate/scripts/evaluate-gate.py
+
+      - name: Upload post-merge validation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-merge-runtime-reports
+          path: |
+            security/reports/zap-report.json
+            security/reports/nuclei-report.jsonl
+            security/reports/nuclei-cve-coverage.json
+            security/reports/nuclei-cve-ids.txt
+            security/reports/nuclei-cve-matched-templates.txt
+            security/reports/dynatrace-problems.json
+            security/reports/runtime-report.json
+            security/reports/security-summary.json
+            security/reports/gate-decision.json
+          if-no-files-found: warn

@@ -18,9 +18,9 @@ Secure PR Gate는 GitHub Actions **Reusable Workflow** 기반 DevSecOps 보안 �
 
 | 항목 | Caller (일반 Workflow) | Reusable Workflow |
 | --- | --- | --- |
-| 파일 | `call-pr-security-gate.yml` 또는 사용자 `security-gate.yml` | `pr-security-gate.yml` |
-| 트리거 | `on: pull_request` | `on: workflow_call` |
-| 역할 | 언제 실행할지 결정, inputs 전달 | 보안 검사·Gate·PR 댓글 실행 |
+| 파일 | PR/Post-merge caller | `pr-security-gate.yml`, `post-merge-security-gate.yml` |
+| 트리거 | `pull_request` 또는 `push: main` | `workflow_call` |
+| 역할 | 실행 시점·배포 순서 결정, inputs 전달 | 프로필별 보안 검사·Gate 실행 |
 | 배포 | 사용자 저장소에 최소 파일 추가 | `uses: ...@v1` 로 버전 고정 호출 |
 
 ```text
@@ -28,6 +28,11 @@ Secure PR Gate는 GitHub Actions **Reusable Workflow** 기반 DevSecOps 보안 �
   -> 사용자 저장소 caller.yml (pull_request)
   -> uses: KT-TECHUP-PROJECT5/secure_gate/.../pr-security-gate.yml@v1
   -> SAST / Secret / Dependency / Runtime / Aggregate / Gate / PR Comment
+
+사용자 main 병합 및 Staging 배포
+  -> 사용자 저장소 post-merge caller.yml (push: main)
+  -> uses: KT-TECHUP-PROJECT5/secure_gate/.../post-merge-security-gate.yml@v1
+  -> Health / ZAP Full / Nuclei 확대 / Dynatrace / Runtime / Policy
 ```
 
 ---
@@ -55,7 +60,14 @@ Secure PR Gate는 GitHub Actions **Reusable Workflow** 기반 DevSecOps 보안 �
 이 저장소 PR에서 reusable workflow를 호출한다.
 `gate_ref`는 `${{ github.sha }}`로 두어, 태그 없이도 PR 커밋의 scripts를 사용한다.
 
-### 3. `cd-staging.yml` — Staging 배포
+### 3. `post-merge-security-gate.yml` — Reusable Post-merge 보안 게이트
+
+트리거: `workflow_call` (직접 실행되지 않음)
+
+Staging URL을 입력받아 Health Check, ZAP/Nuclei `post-merge` 프로필, Dynatrace 수집,
+필수 원본 보고서 검증 및 Policy Evaluator를 실행한다.
+
+### 4. `cd-staging.yml` — 이 저장소용 Staging Caller
 
 트리거: `push` → `main`
 
@@ -63,9 +75,9 @@ Secure PR Gate는 GitHub Actions **Reusable Workflow** 기반 DevSecOps 보안 �
 | --- | --- | --- |
 | `docker-build` | Docker 이미지 빌드 | Placeholder (4차 구현) |
 | `staging-deploy` | Staging 환경 배포 | Placeholder (4차 구현) |
-| `post-deploy-validation` | 배포 후 Health Check / Smoke Test / DAST | Placeholder (D파트 연결 예정) |
+| `post-deploy-validation` | `post-merge-security-gate.yml` 호출 | Reusable 연결 완료 |
 
-### 4. PR DAST와 Staging CD DAST 역할 구분
+### 5. PR DAST와 Staging CD DAST 역할 구분
 
 DAST는 PR Gate와 Staging CD에서 목적이 다르다. `enable_dast=true`이고 Staging 배포 후에도 DAST를 돌리면 검사가 두 번 실행될 수 있다.
 
@@ -75,7 +87,7 @@ DAST는 PR Gate와 Staging CD에서 목적이 다르다. `enable_dast=true`이�
 | 환경 | runner-local 또는 `target_url` | 실제 Staging 배포 환경 |
 | 목적 | Merge 전 선택적·경량 동적 검사 | 배포 후 환경·헤더·프록시까지 포함한 재검증 |
 | 도구 | ZAP, Nuclei, 직접 보안 헤더 검사 | Health Check, Smoke Test, DAST |
-| 기본값 | `enable_dast: false` (선택) | 목표 구조, 현재 Placeholder |
+| 기본값 | `enable_dast: false` (선택) | ZAP/Nuclei/Dynatrace 필수 하드 프로필 |
 | 결과 처리 | `runtime-report.json` → Aggregator → Policy Evaluator → Required Check | 배포 성공/중단·Rollback 판단 |
 
 PR 단계에서는 시간을 고려해 Baseline·제한 심각도 중심의 검사를 두고, 전체 검증은 Staging 배포 후에 수행하는 구성을 권장한다.
