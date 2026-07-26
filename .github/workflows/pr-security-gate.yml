@@ -566,7 +566,7 @@ jobs:
       - name: Download all scan reports
         uses: actions/download-artifact@v4
         with:
-          path: security/reports
+          path: .
           merge-multiple: true
 
       - name: Resolve policy file
@@ -587,9 +587,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      - name: Run Normalizer
-        run: python .secure-gate/scripts/normalize-reports.py
 
       - name: Run Aggregator
         run: python .secure-gate/scripts/aggregate-results.py
