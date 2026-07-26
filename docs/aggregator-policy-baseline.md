@@ -195,7 +195,7 @@ Post-merge에서는 CycloneDX SBOM 업로드 성공을 필수로 본다.
 | PR vs Post-merge 차단 기준 | 동일 | 유지 |
 | 예외 승인 | `security/policies/suppressions.json` | 기본 골격 반영 |
 | AI 보고서 참고 | `docs/AI-reference.md` | 반영 |
-| IR 플레이북 | 운영 문서(후속) | 보류 |
+| IR 플레이북 | `docs/incident-response-playbook.md` | 반영 |
 | ZAP XSS 탐지 고도화 | 별도 DAST 과제 | 보류 |
 
 CVE 트랙은 category 판정 **이후** dependency(`CVE-*`) finding만 보정한다.

@@ -1,8 +1,8 @@
 ---
 문서명: 프로젝트 협업용 가이드
-최신화: 2026-07-24
+최신화: 2026-07-26
 작성자: 이윤재
-Version: 1.8.0
+Version: 1.9.0
 ---
 
 # Team Interface — A 파트 연동 가이드
@@ -175,7 +175,8 @@ Aggregator/Policy는 아래 기준선으로 진행한다.
 | Aggregator 기준선            | `docs/aggregator-policy-baseline.md` Baseline v0.2                | 진행 기준                |
 | 예외 승인                    | `security/policies/suppressions.json` (사유·승인자·만료일)        | 기본 골격 반영           |
 | 현재 코드                    | category 기반 Block/Warn (`scripts/gate_policy.py`)               | 운영 준비                |
-| AI 결과 보고서 / 수정 가이드 | 별도 담당                                                         | 본 범위 제외             |
+| AI 결과 보고서 / 수정 가이드 | 별도 담당 (`docs/AI-reference.md`)                                | 본 범위 제외             |
+| IR 플레이북                  | `docs/incident-response-playbook.md` (사람 대응/SLA)              | 반영                     |
 | ZAP XSS 탐지 고도화          | DAST 고도화로 이관                                                | 보류                     |
 | Discord/Telegram 요약 알림   | Gate 요약 연동                                                    | 다음 작업 후보           |
 
