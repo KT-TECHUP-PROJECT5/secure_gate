@@ -9,6 +9,7 @@ Merge 차단 여부를 판단하고 gate-decision.json을 생성한다.
 - 검사는 PR soft / Post-merge hard로 강도가 달라도 차단 기준은 동일
 - Secret, 실제 고위험 vuln, 가용성 장애, 스캐너 기술 실패만 Block
 - misconfig / Medium 위생 이슈는 Warn
+- dependency CVE는 category 판정 후 cve_track 보정 레이어로 promote/demote
 """
 
 import json
@@ -20,6 +21,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
+import cve_track
 import gate_policy
 
 REPORTS_DIR = Path("security/reports")
@@ -155,6 +157,9 @@ def main():
     suppressions = load_suppressions(SUPPRESSIONS_FILE)
     decision = evaluate(summary, policy, suppressions)
 
+    cve_result = cve_track.load_cve_decision(policy)
+    decision = cve_track.apply_cve_track(decision, cve_result, policy)
+
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     with open(DECISION_FILE, "w") as f:
         json.dump(decision, f, indent=2)
@@ -169,6 +174,15 @@ def main():
             "  [SUPPRESS] "
             f"{item.get('id')} ({item.get('expires_on') or 'n/a'}): "
             f"{item.get('reason')}"
+        )
+    cve_meta = decision.get("cve_track") or {}
+    if cve_meta:
+        print(
+            "  [CVE] "
+            f"mode={cve_meta.get('mode')} source={cve_meta.get('source')} "
+            f"promoted={cve_meta.get('promoted', 0)} "
+            f"demoted={cve_meta.get('demoted', 0)} "
+            f"applied={cve_meta.get('applied', 0)}"
         )
     print(f"  Total findings: {decision['total_findings']}")
 

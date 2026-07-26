@@ -160,31 +160,34 @@ def normalize_trivy(data: dict) -> dict:
             package = str(vulnerability.get("PkgName") or "unknown-package")
             installed = str(vulnerability.get("InstalledVersion") or "unknown")
             fixed = str(vulnerability.get("FixedVersion") or "")
+            pkg_identifier = vulnerability.get("PkgIdentifier") or {}
+            purl = pkg_identifier.get("PURL") if isinstance(pkg_identifier, dict) else None
             description = (
                 f"{package}@{installed} is affected."
                 + (f" Fixed version: {fixed}." if fixed else "")
             )
-            findings.append(
-                gate_policy.with_category(
-                    {
-                        "id": str(
-                            vulnerability.get("VulnerabilityID")
-                            or "trivy.vulnerability"
-                        ),
-                        "severity": str(
-                            vulnerability.get("Severity") or "UNKNOWN"
-                        ).lower(),
-                        "category": "vuln",
-                        "title": str(
-                            vulnerability.get("Title")
-                            or vulnerability.get("VulnerabilityID")
-                            or "Trivy vulnerability"
-                        ),
-                        "description": description,
-                        "location": f"{target}:{package}",
-                    }
-                )
-            )
+            finding = {
+                "id": str(
+                    vulnerability.get("VulnerabilityID")
+                    or "trivy.vulnerability"
+                ),
+                "severity": str(
+                    vulnerability.get("Severity") or "UNKNOWN"
+                ).lower(),
+                "category": "vuln",
+                "title": str(
+                    vulnerability.get("Title")
+                    or vulnerability.get("VulnerabilityID")
+                    or "Trivy vulnerability"
+                ),
+                "description": description,
+                "location": f"{target}:{package}",
+            }
+            if purl:
+                finding["purl"] = str(purl)
+            if fixed:
+                finding["fixedVersion"] = fixed
+            findings.append(gate_policy.with_category(finding))
     return {
         "status": finding_status(findings),
         "tool": "trivy",

@@ -6,5 +6,38 @@
   "blockOnVulnCritical": true,
   "blockOnVulnHigh": true,
   "warnOnMedium": true,
-  "warnOnMisconfig": true
+  "warnOnMisconfig": true,
+  "cveTrack": {
+    "enabled": "monitor",
+    "decisionFile": "security/reports/cve-policy-decision.json",
+    "runner": {
+      "runnerId": "cve-policy-evaluate",
+      "allowSelfInvoke": true
+    },
+    "timeoutSeconds": 120,
+    "onTrackFailure": {
+      "scriptError": "failOpen",
+      "dataUnavailable": "failOpen",
+      "timeout": "failOpen"
+    },
+    "bypass": {
+      "enabled": true,
+      "signalEnv": "CVE_TRACK_BYPASS",
+      "scope": "trackFailureOnly"
+    },
+    "adjustment": {
+      "annotateOnly": true,
+      "promote": {
+        "kev": true
+      },
+      "demote": {
+        "enabled": true,
+        "requireNotKev": true,
+        "maxEpss": 0.1,
+        "minSeverity": "high",
+        "demoteOnlyWhenNoFix": true,
+        "neverDemoteAtOrAboveCvss": 9.0
+      }
+    }
+  }
 }

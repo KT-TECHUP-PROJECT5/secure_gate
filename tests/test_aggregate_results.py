@@ -91,6 +91,9 @@ class ScannerNormalizationTests(unittest.TestCase):
                                 "FixedVersion": "1.0.1",
                                 "Severity": "CRITICAL",
                                 "Title": "Example vulnerability",
+                                "PkgIdentifier": {
+                                    "PURL": "pkg:npm/example@1.0.0"
+                                },
                             }
                         ],
                     }
@@ -105,6 +108,8 @@ class ScannerNormalizationTests(unittest.TestCase):
             "package-lock.json:example",
             report["findings"][0]["location"],
         )
+        self.assertEqual("pkg:npm/example@1.0.0", report["findings"][0]["purl"])
+        self.assertEqual("1.0.1", report["findings"][0]["fixedVersion"])
 
     def test_runtime_misconfig_findings_become_warning_status(self):
         report = aggregate_results.normalize_report(
