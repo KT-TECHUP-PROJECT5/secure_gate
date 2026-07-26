@@ -67,6 +67,31 @@ def load_suppressions(path: Path) -> list:
     sys.exit(1)
 
 
+def report_failure_reasons(summary: dict) -> list[str]:
+    """Build specific scanner/report failure reasons from summary.reports."""
+    reasons = []
+    for report_name, report in (summary.get("reports") or {}).items():
+        if not isinstance(report, dict):
+            continue
+        status = str(report.get("status") or "").lower()
+        errors = report.get("errors") or []
+        detail = ""
+        if isinstance(errors, list) and errors:
+            first = errors[0]
+            detail = f" ({first})" if isinstance(first, str) else ""
+
+        if status == "not_found":
+            reasons.append(f"필수 보안 보고서 누락: {report_name}")
+        elif status == "error":
+            reasons.append(f"보안 보고서 처리 실패: {report_name}{detail}")
+
+    if not reasons and summary.get("has_error"):
+        reasons.append(
+            "필수 보안 보고서가 누락되었거나 올바르게 처리되지 않았습니다."
+        )
+    return reasons
+
+
 def evaluate(summary: dict, policy: dict, suppressions: list | None = None) -> dict:
     blocked = False
     block_reasons = []
@@ -76,9 +101,9 @@ def evaluate(summary: dict, policy: dict, suppressions: list | None = None) -> d
 
     if summary.get("has_error") and policy.get("blockOnScannerError", True):
         blocked = True
-        block_reasons.append(
-            "필수 보안 보고서가 누락되었거나 올바르게 처리되지 않았습니다."
-        )
+        for reason in report_failure_reasons(summary):
+            if reason not in block_reasons:
+                block_reasons.append(reason)
 
     annotated_reports = {}
     for report_name, report in (summary.get("reports") or {}).items():

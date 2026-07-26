@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import unittest
 from pathlib import Path
 
@@ -47,7 +48,7 @@ class ScannerNormalizationTests(unittest.TestCase):
                         },
                     }
                 ],
-                "errors": [{"message": "partial parse"}],
+                "errors": [{"message": "fatal scanner failure", "level": "error"}],
             },
         )
 
@@ -56,6 +57,37 @@ class ScannerNormalizationTests(unittest.TestCase):
         self.assertEqual("vuln", report["findings"][0]["category"])
         self.assertEqual("app.py:12", report["findings"][0]["location"])
         self.assertTrue(report["errors"])
+
+    def test_semgrep_partial_parsing_is_soft_warning(self):
+        report = aggregate_results.normalize_report(
+            "sast",
+            {
+                "results": [
+                    {
+                        "check_id": "python.security.test",
+                        "path": "app.py",
+                        "start": {"line": 12},
+                        "extra": {
+                            "severity": "ERROR",
+                            "message": "Unsafe operation",
+                        },
+                    }
+                ],
+                "errors": [
+                    {
+                        "code": 3,
+                        "level": "warn",
+                        "type": ["PartialParsing", []],
+                        "message": "Syntax error at line app/templates/login.html:1",
+                        "path": "app/templates/login.html",
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual("failed", report["status"])
+        self.assertEqual([], report["errors"])
+        self.assertEqual(1, len(report.get("scanner_warnings") or []))
 
     def test_gitleaks_array_becomes_secret_findings(self):
         report = aggregate_results.normalize_report(
@@ -144,6 +176,30 @@ class ScannerNormalizationTests(unittest.TestCase):
         self.assertEqual("passed", succeeded["status"])
         self.assertEqual("error", failed["status"])
         self.assertTrue(failed["errors"])
+
+    def test_dependency_track_skip_passes_unless_required(self):
+        skipped = aggregate_results.normalize_report(
+            "dependency_track",
+            {"status": "skipped", "reason": "upload-mode-never"},
+        )
+        self.assertEqual("passed", skipped["status"])
+        self.assertEqual([], skipped["errors"])
+
+        previous = os.environ.get("SECURE_GATE_REQUIRE_DT_UPLOAD")
+        os.environ["SECURE_GATE_REQUIRE_DT_UPLOAD"] = "true"
+        try:
+            required = aggregate_results.normalize_report(
+                "dependency_track",
+                {"status": "skipped", "reason": "upload-mode-never"},
+            )
+        finally:
+            if previous is None:
+                os.environ.pop("SECURE_GATE_REQUIRE_DT_UPLOAD", None)
+            else:
+                os.environ["SECURE_GATE_REQUIRE_DT_UPLOAD"] = previous
+
+        self.assertEqual("error", required["status"])
+        self.assertTrue(required["errors"])
 
     def test_unsupported_schema_is_a_report_error(self):
         report = aggregate_results.normalize_report("sast", {"unexpected": []})

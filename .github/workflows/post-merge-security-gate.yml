@@ -405,6 +405,9 @@ jobs:
           path: security/reports
 
       - name: Aggregate post-merge results
+        env:
+          # Post-merge requires a real DT upload; intentional skips must fail-closed.
+          SECURE_GATE_REQUIRE_DT_UPLOAD: "true"
         run: |
           python3 .secure-gate/scripts/aggregate-results.py \
             --reports dependency_scan,dependency_track,runtime_validation

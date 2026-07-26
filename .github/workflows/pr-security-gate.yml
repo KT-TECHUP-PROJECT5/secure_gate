@@ -610,6 +610,13 @@ jobs:
           path: security/reports
         continue-on-error: true
 
+      - name: Download Dependency-Track upload report
+        uses: actions/download-artifact@v4
+        with:
+          name: dependency-track-upload-report
+          path: security/reports
+        continue-on-error: true
+
       - name: Download SBOM
         uses: actions/download-artifact@v4
         with:
