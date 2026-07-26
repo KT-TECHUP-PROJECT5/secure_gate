@@ -1,6 +1,45 @@
 {
-  "blockOnCritical": true,
-  "blockOnHigh": true,
-  "blockOnSecret": true,
-  "warnOnMedium": true
+  "version": 1,
+  "defaultProfile": "pr",
+  "profiles": {
+    "pr": {
+      "blockOnReportError": true,
+      "blockSeverities": [
+        "critical",
+        "high",
+        "secret"
+      ],
+      "warnSeverities": [
+        "medium"
+      ],
+      "unknownSeverity": "block"
+    },
+    "post_merge": {
+      "blockOnReportError": true,
+      "blockSeverities": [
+        "critical",
+        "high",
+        "secret"
+      ],
+      "warnSeverities": [
+        "medium"
+      ],
+      "unknownSeverity": "block"
+    },
+    "training": {
+      "blockOnReportError": true,
+      "blockSeverities": [
+        "secret"
+      ],
+      "warnSeverities": [
+        "critical",
+        "high",
+        "medium"
+      ],
+      "unknownSeverity": "warn"
+    }
+  },
+  "exceptionPolicy": {
+    "file": "accepted-risks.json"
+  }
 }

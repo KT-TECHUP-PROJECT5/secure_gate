@@ -6,6 +6,7 @@ security/reports/*.json
 security/reports/*.jsonl
 security/reports/*.sarif
 security/reports/*.txt
+security/reports/*.md
 
 # Python
 __pycache__/

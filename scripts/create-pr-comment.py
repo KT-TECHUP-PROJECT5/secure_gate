@@ -19,6 +19,7 @@ import urllib.error
 from pathlib import Path
 
 DECISION_FILE = Path("security/reports/gate-decision.json")
+AI_SUMMARY_FILE = Path("security/reports/ai-security-summary.json")
 
 TOOL_LABELS = {
     "build":              "Build / Test",
@@ -37,6 +38,17 @@ def load_decision() -> dict:
         return json.load(f)
 
 
+def load_ai_summary() -> dict | None:
+    if not AI_SUMMARY_FILE.exists():
+        return None
+    try:
+        with open(AI_SUMMARY_FILE) as summary_file:
+            data = json.load(summary_file)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def report_row(label: str, report: dict) -> str:
     status = report.get("status", "not_found")
     count  = len(report.get("findings", []))
@@ -51,7 +63,45 @@ def report_row(label: str, report: dict) -> str:
         return f"| {label} | ❌ Failed | {count}건 |"
 
 
-def build_comment(decision: dict | None) -> str:
+def build_ai_section(ai_summary: dict | None) -> str:
+    if not ai_summary:
+        return ""
+
+    status = ai_summary.get("status")
+    if status != "succeeded":
+        return (
+            "\n### AI 설명\n\n"
+            f"- 생성 상태: `{status or 'unknown'}`\n"
+            f"- Gate 판정에는 영향을 주지 않습니다.\n"
+        )
+
+    analysis = ai_summary.get("analysis")
+    if not isinstance(analysis, dict):
+        return ""
+
+    executive_summary = analysis.get("executive_summary", "")
+    prioritized_findings = analysis.get("prioritized_findings", [])
+    lines = ["\n### AI 요약\n", executive_summary]
+    if prioritized_findings:
+        lines.extend(["\n#### 우선 개선 방향\n"])
+        for finding in prioritized_findings[:5]:
+            if not isinstance(finding, dict):
+                continue
+            lines.append(
+                f"- **{finding.get('title', 'Untitled finding')}** "
+                f"(`{finding.get('severity', 'unknown')}`): "
+                f"{finding.get('remediation', '')}"
+            )
+    lines.append(
+        "\n> AI 내용은 설명용이며, 최종 판정은 Gate Evaluator 결과를 따릅니다.\n"
+    )
+    return "\n".join(lines)
+
+
+def build_comment(
+    decision: dict | None,
+    ai_summary: dict | None = None,
+) -> str:
     if decision is None:
         return (
             "## Secure PR Gate 결과\n\n"
@@ -62,10 +112,12 @@ def build_comment(decision: dict | None) -> str:
 
     gate_status = decision.get("gate_status", "UNKNOWN")
     status_icon = "✅" if gate_status == "PASSED" else "❌"
+    policy_profile = decision.get("policy_profile", "unknown")
 
     reports       = decision.get("reports", {})
     block_reasons = decision.get("block_reasons", [])
     warnings      = decision.get("warnings", [])
+    accepted_risks = decision.get("accepted_risks", [])
 
     rows = "\n".join(
         report_row(label, reports.get(key, {}))
@@ -82,24 +134,40 @@ def build_comment(decision: dict | None) -> str:
         items = "\n".join(f"- {w}" for w in warnings)
         warning_section = f"\n### 경고\n\n{items}\n"
 
+    exception_section = ""
+    if accepted_risks:
+        items = "\n".join(
+            (
+                f"- `{entry.get('id', 'unknown')}` "
+                f"(만료: {entry.get('expiresAt', 'unknown')}, "
+                f"승인: {entry.get('approvedBy', 'unknown')})"
+            )
+            for entry in accepted_risks
+        )
+        exception_section = f"\n### 승인된 예외\n\n{items}\n"
+
     guide_section = (
         "\n### 수정 가이드\n\n"
         "<!-- E 파트의 수정 가이드 템플릿과 연결 예정 -->\n"
         "- 수정 후 다시 push하면 Security Gate가 재실행됩니다.\n"
         if block_reasons else ""
     )
+    ai_section = build_ai_section(ai_summary)
 
     return (
         f"## Secure PR Gate 결과\n\n"
         f"### 최종 판단\n\n"
         f"**Gate Status: {status_icon} {gate_status}**\n\n"
+        f"- Policy profile: `{policy_profile}`\n\n"
         f"### 검사 요약\n\n"
         f"| 영역 | 결과 | 요약 |\n"
         f"| --- | --- | --- |\n"
         f"{rows}\n"
         f"{block_section}"
         f"{warning_section}"
+        f"{exception_section}"
         f"{guide_section}"
+        f"{ai_section}"
         f"\n---\n*Secure PR Gate by A-Part Pipeline*"
     )
 
@@ -154,7 +222,8 @@ def main():
         sys.exit(1)
 
     decision = load_decision()
-    body = build_comment(decision)
+    ai_summary = load_ai_summary()
+    body = build_comment(decision, ai_summary)
 
     post_comment(token, repo, pr_number, body)
 

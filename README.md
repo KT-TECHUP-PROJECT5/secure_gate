@@ -50,7 +50,9 @@ flowchart TD
     K -- Warning --> M[PR 댓글 경고]
     K -- Yes --> N[PR Check 성공 / Merge 허용]
 
+    J --> X[AI 결과 설명 생성 선택]
     J --> O[PR Comment Bot 결과 요약 댓글 작성]
+    X --> O
 
     N --> P[main 브랜치 Merge]
     P --> Q[CD Workflow 실행]
@@ -78,6 +80,7 @@ flowchart TD
 | Runtime Validation | Health Check, Smoke Test, 보안 헤더, Custom Runtime Check, ZAP/Nuclei 및 Dynatrace 문제 결과 정규화, Trivy CVE 우선 검사 |
 | Aggregator | 각 보안 도구의 결과 파일을 하나의 Summary로 통합 |
 | Policy Evaluator | 위험도 및 정책 기준으로 Merge/배포 가능 여부 판단 |
+| AI Security Report | 확정 Gate 결과를 사람이 읽기 쉽게 요약하고 간단한 개선 방향 제시 |
 | Merge 차단 | Critical/High 취약점 또는 Secret 탐지 시 PR 자동 차단 |
 | PR 댓글 자동화 | 검사 결과, 차단 사유, 수정 가이드를 PR 댓글로 제공 |
 | CD Workflow | main Merge 이후 Docker Build 및 Staging 자동 배포 |
@@ -99,6 +102,13 @@ flowchart TD
 | 검사 통과 | Merge 허용 |
 
 정책 기준은 `security/policies/security-gate-policy.json`에서 관리하며, OWASP/CVSS 기준에 따라 세분화 가능하다.
+Policy v1은 `pr`, `post_merge`, `training` 프로필을 제공한다. 필수 보고서 오류와
+알 수 없는 severity는 기본적으로 차단하며, 승인자·사유·만료일이 있는 예외만
+`security/policies/accepted-risks.json`에서 관리한다. Secret finding에는 예외를 적용하지 않는다.
+
+교육용 취약 앱은 기본 정책을 완화하지 않고 실행할 때만
+`SECURE_GATE_PROFILE=training`을 지정한다. 이 경우 Critical/High/Medium은 경고로
+기록하지만 Secret과 필수 검사 오류는 계속 차단한다.
 
 ---
 
@@ -143,6 +153,7 @@ Gate Status: ❌ FAILED
 | Observability | Dynatrace OneAgent, Problems API v2 |
 | Runtime Validation | Health Check, Smoke Test, Security Header Check, 결과 정규화 |
 | Aggregator / Policy Evaluator | Python |
+| AI Report | OpenAI Responses API, Structured Outputs |
 | PR Comment | GitHub API |
 | Deployment | Docker Build, Staging Deploy |
 
@@ -202,6 +213,7 @@ uses: KT-TECHUP-PROJECT5/secure_gate/.github/workflows/pr-security-gate.yml@v1
 ├── scripts/
 │   ├── aggregate-results.py           # 보안 검사 결과 통합
 │   ├── evaluate-gate.py               # 정책 기반 Gate 판단
+│   ├── generate-ai-security-summary.py # 비차단 AI 요약 및 개선 방향 생성
 │   ├── create-pr-comment.py           # PR 댓글 자동 작성
 │   ├── runtime-validation.py          # D파트 Runtime Validation 통합 및 필수 결과 검증
 │   ├── fetch-dynatrace-problems.py    # Dynatrace Problems와 서비스 탐지 상태 수집
@@ -211,7 +223,8 @@ uses: KT-TECHUP-PROJECT5/secure_gate/.github/workflows/pr-security-gate.yml@v1
 │
 ├── security/
 │   ├── policies/
-│   │   └── security-gate-policy.json  # Merge 차단 정책
+│   │   ├── security-gate-policy.json  # Merge 차단 정책
+│   │   └── accepted-risks.json        # 승인자·사유·만료일 기반 예외
 │   ├── reports/                        # 보안 검사 결과 저장
 │   └── templates/
 │       └── pr-comment-template.md      # PR 댓글 템플릿
@@ -219,6 +232,7 @@ uses: KT-TECHUP-PROJECT5/secure_gate/.github/workflows/pr-security-gate.yml@v1
 └── docs/
     ├── project.md                 # 프로젝트 가이드
     ├── pipeline-guide.md          # 파이프라인 운영 가이드
+    ├── ai-security-report.md      # AI 결과 설명 계층 가이드
     ├── team-interface.md          # 팀 연동 인터페이스 및 협업 프로세스
     └── tasks/
         └── A-part-task.md         # 작업 체크리스트

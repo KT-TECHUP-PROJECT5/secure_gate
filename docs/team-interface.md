@@ -167,10 +167,13 @@ steps:
 | -------------------------- | ------------------------------------------------ | ----------- |
 | Merge 차단 기준            | Critical / High / Secret (초기 정책 적용 중)     | 초기값 적용 |
 | Warning 처리 기준          | Medium (초기 정책 적용 중)                       | 초기값 적용 |
-| Aggregator 기준선          | `docs/aggregator-policy-baseline.md`의 Baseline v0.1 | 팀 합의 전 |
+| Aggregator 기준선          | `docs/aggregator-policy-baseline.md`의 Policy v1 | 초기 운영 기준 |
 | CVSS 등급 기준             |                                                  | 미확정      |
 | 도구별 Severity 매핑 기준  |                                                  | 미확정      |
 | PR 댓글 수정 가이드 템플릿 | `security/templates/pr-comment-template.md` 참고 | 미확정      |
+| 교육용 정책 프로필         | `training`: Critical/High/Medium 경고, Secret·기술 실패 차단 | 구현 완료 / Workflow 입력 연결 필요 |
+| AI 결과 설명               | `gate-decision.json`을 요약하고 간단한 개선 방향 제시. Gate 판정에는 미사용 | 스크립트 구현 완료 / A파트 연결 필요 |
+| AI 인증값                  | `OPENAI_API_KEY` GitHub Secret, `OPENAI_MODEL` Repository Variable 선택 | A파트 등록 필요 |
 | IR 플레이북 연결 기준      |                                                  | 미확정      |
 
 ---
@@ -192,3 +195,5 @@ steps:
 | D - Runtime Validation | `security/reports/runtime-report.json`    |
 | A - Summary            | `security/reports/security-summary.json`  |
 | A - Gate Decision      | `security/reports/gate-decision.json`     |
+| AI - Structured Summary | `security/reports/ai-security-summary.json` |
+| AI - Readable Report   | `security/reports/ai-security-summary.md` |

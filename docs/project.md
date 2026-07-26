@@ -207,6 +207,7 @@ security/
 scripts/
   aggregate-results.py
   evaluate-gate.py
+  generate-ai-security-summary.py
   create-pr-comment.py
   runtime-validation.py
   fetch-dynatrace-problems.py
@@ -279,16 +280,23 @@ DAST는 두 단계에서 목적과 환경이 다르다. 둘 다 활성화하면 
 
 ## 11. Security Gate 정책
 
-초기 정책은 단순한 기준으로 시작하고, E 파트의 OWASP/CVSS 기준이 확정되면 구체화한다.
+Policy v1은 PR, Post-merge, 교육용 검증 기준을 프로필로 분리하고,
+Accepted Risk의 승인자·사유·만료일을 검증한다.
 
-### 초기 정책 예시
+### Policy v1 예시
 
 ```json
 {
-  "blockOnCritical": true,
-  "blockOnHigh": true,
-  "blockOnSecret": true,
-  "warnOnMedium": true
+  "version": 1,
+  "defaultProfile": "pr",
+  "profiles": {
+    "pr": {
+      "blockOnReportError": true,
+      "blockSeverities": ["critical", "high", "secret"],
+      "warnSeverities": ["medium"],
+      "unknownSeverity": "block"
+    }
+  }
 }
 ```
 
@@ -302,6 +310,14 @@ DAST는 두 단계에서 목적과 환경이 다르다. 둘 다 활성화하면 
 | Medium 취약점 탐지   | PR 댓글 경고 |
 | Low 취약점 탐지      | 리포트 기록  |
 | 검사 통과            | Merge 허용   |
+
+교육용 `training` 프로필은 Critical/High/Medium을 경고로 기록하지만 Secret과
+필수 보고서 오류는 차단한다. 예외는 `security/policies/accepted-risks.json`에서
+관리하며 만료된 예외와 Secret 예외는 적용하지 않는다.
+
+기본값은 `pr`로 유지하고 교육용 테스트 실행에만
+`SECURE_GATE_PROFILE=training`을 전달한다. AI는 이 확정 판정 뒤에서 설명만
+생성하며 Gate 상태를 변경하지 않는다.
 
 ---
 
@@ -320,9 +336,13 @@ security/reports/
   runtime-report.json
   security-summary.json
   gate-decision.json
+  ai-security-summary.json
+  ai-security-summary.md
 ```
 
 Aggregator는 각 결과 파일을 수집하여 `security-summary.json`을 생성하고, Policy Evaluator는 이를 기반으로 `gate-decision.json`을 생성한다.
+AI 설명기는 `gate-decision.json`의 정규화된 결과를 입력으로 사용하고,
+구조화 JSON과 사람이 읽는 Markdown을 별도 생성한다.
 
 ---
 

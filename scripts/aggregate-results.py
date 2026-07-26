@@ -38,10 +38,18 @@ REPORT_FILES = {
     "runtime_validation": "runtime-report.json",
 }
 
+DEFAULT_REPORT_KEYS = (
+    "build",
+    "sast",
+    "secret_scan",
+    "dependency_scan",
+    "runtime_validation",
+)
+
 
 def select_report_files(raw_value: str) -> dict[str, str]:
     if not raw_value.strip():
-        return dict(REPORT_FILES)
+        return {key: REPORT_FILES[key] for key in DEFAULT_REPORT_KEYS}
 
     keys = [key.strip() for key in raw_value.split(",") if key.strip()]
     unknown = [key for key in keys if key not in REPORT_FILES]
@@ -85,13 +93,27 @@ def normalize_semgrep(data: dict) -> dict:
             }
         )
 
-    scanner_errors = data.get("errors")
-    has_scanner_errors = isinstance(scanner_errors, list) and bool(scanner_errors)
+    scanner_messages = data.get("errors")
+    if not isinstance(scanner_messages, list):
+        scanner_messages = []
+    scanner_errors = []
+    scanner_warnings = []
+    for message in scanner_messages:
+        level = "error"
+        if isinstance(message, dict):
+            level = str(message.get("level") or "error").strip().lower()
+        if level in {"warn", "warning", "info"}:
+            scanner_warnings.append(message)
+        else:
+            scanner_errors.append(message)
+
+    has_scanner_errors = bool(scanner_errors)
     return {
         "status": "error" if has_scanner_errors else finding_status(findings),
         "tool": "semgrep",
         "findings": findings,
-        "errors": scanner_errors if has_scanner_errors else [],
+        "errors": scanner_errors,
+        "warnings": scanner_warnings,
     }
 
 
