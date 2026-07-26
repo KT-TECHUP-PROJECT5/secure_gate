@@ -22,14 +22,14 @@ CVE 보정 레이어의 강등 가드(D-16)가 무력화된다. TARGETS 에 다�
 공통 스키마:
 {
   "status": "passed" | "failed",
-  "tool":   "semgrep" | "gitleaks" | "trivy",
+  "tool":   "semgrep" | "gitleaks",
   "findings": [
     {"id","severity","title","description","location"}
   ]
 }
 
-severity는 각 도구의 '원본 값'을 그대로 싣는다(Semgrep: ERROR/WARNING/INFO,
-Trivy: CRITICAL/HIGH/...). 공통 등급으로의 매핑은 evaluate-gate.py가
+severity는 각 도구의 '원본 값'을 그대로 싣는다(Semgrep: ERROR/WARNING/INFO).
+공통 등급으로의 매핑은 evaluate-gate.py가
 security-gate-policy.json의 severityMapping으로 처리한다. Gitleaks는 원본
 등급 개념이 없어 "secret"으로 고정하지만, 매핑 단계에서도 default로 처리된다.
 """
@@ -81,26 +81,9 @@ def normalize_gitleaks(data: list) -> list:
     return findings
 
 
-def normalize_trivy(data: dict) -> list:
-    findings = []
-    for res in data.get("Results", []) or []:
-        target = res.get("Target", "?")
-        for v in res.get("Vulnerabilities", []) or []:
-            pkg = f"{v.get('PkgName','?')} {v.get('InstalledVersion','')}".strip()
-            findings.append({
-                "id":          v.get("VulnerabilityID"),
-                "severity":    v.get("Severity"),  # CRITICAL / HIGH / MEDIUM / LOW / UNKNOWN
-                "title":       v.get("Title") or v.get("VulnerabilityID"),
-                "description": v.get("Description", ""),
-                "location":    f"{target} ({pkg})",
-            })
-    return findings
-
-
 NORMALIZERS = {
     "semgrep":  normalize_semgrep,
     "gitleaks": normalize_gitleaks,
-    "trivy":    normalize_trivy,
 }
 
 

@@ -104,6 +104,8 @@
             },
             "demote": {
               "type": "object",
+              "$comment": "demote 하위 키는 전부 명시를 강제한다. maxEpss / neverDemoteAtOrAboveCvss 는 코드에서 None 이면 해당 조건을 통째로 건너뛰고(`is not None` 가드), enabled 는 키가 없으면 코드 기본값 True 로 강등이 켜진다 — 셋 다 누락 방향이 '강등이 쉬워지는' 쪽이다. 강등은 차단을 푸는 유일한 경로라(D-15) 누락 시 fail-closed 로 막는다. required 는 프로파일 병합 '후' 값을 보므로 base policy 가 키를 빠뜨리면 잡지 못한다 — base 에도 반드시 명시할 것.",
+              "required": ["enabled", "maxEpss", "neverDemoteAtOrAboveCvss"],
               "properties": {
                 "enabled": { "type": "boolean", "description": "false면 강등 자체를 끔(strict 프로파일). 미지정 시 기본 활성." },
                 "requireNotKev": { "type": "boolean" },

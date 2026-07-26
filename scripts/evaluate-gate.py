@@ -25,6 +25,7 @@ import os
 import subprocess
 import sys
 import time
+import traceback
 from pathlib import Path
 
 # ── 툴링 루트 (이 파일: <root>/scripts/evaluate-gate.py) ──
@@ -501,6 +502,7 @@ def _verdict_of(f) -> str:
 def _build_evidence_index(cve_decision: dict):
     """(purl_norm, cve) -> evidence, 그리고 cve -> evidence (폴백/KEV 스캔용)."""
     by_key, by_cve = {}, {}
+    cve_purls = {}
     for c in cve_decision.get("cves", []):
         cve = c.get("cve")
         ev_raw = c.get("evidence", {})
@@ -511,8 +513,16 @@ def _build_evidence_index(cve_decision: dict):
             "severity": _norm_sev(ev_raw.get("severity")),
         }
         for pkg in c.get("packages", []):
-            by_key[(_norm_purl(pkg.get("purl")), cve)] = entry
+            purl_norm = _norm_purl(pkg.get("purl"))
+            by_key[(purl_norm, cve)] = entry
+            cve_purls.setdefault(cve, set()).add(purl_norm)
         by_cve.setdefault(cve, entry)
+    # purl 없는 finding 의 CVE 단독 폴백 유일성 판정용. 레코드가 여러 개로
+    # 쪼개져 있어도 CVE 기준으로 합산한다. packages 가 아예 없는 CVE 는 키가
+    # 생기지 않아 폴백 불가(= 유일하지 않음)로 취급된다.
+    for cve, purls in cve_purls.items():
+        if cve in by_cve:
+            by_cve[cve]["package_count"] = len(purls)
     return by_key, by_cve
 
 
@@ -524,7 +534,12 @@ def _match_evidence(f, by_key, by_cve):
     if purl is not None:
         return by_key.get((purl, cve))
     ev = by_cve.get(cve)
-    # purl 없는 finding: CVE 단독 폴백은 evidence에 그 CVE가 있을 때만
+    # purl 없는 finding: evidence 상 패키지가 유일할 때만 CVE 단독 폴백을 허용한다.
+    # 한 CVE 가 여러 패키지에 걸쳐 있으면 어느 패키지의 신호인지 특정할 수 없고,
+    # 엉뚱한 패키지의 낮은 신호로 차단이 풀릴 수 있다. 매칭 실패로 두면 Trivy
+    # 판정이 유지돼 안전하다(D-19 — 매칭 실패의 위험은 비대칭).
+    if ev is None or ev.get("package_count") != 1:
+        return None
     return ev
 
 
@@ -591,7 +606,12 @@ def _cve_only_kev_warnings(by_cve, findings):
 
 
 def _handle_track_failure(cve_result, ct, policy):
-    """트랙 실패 시 (block_reasons, warnings, suppression). findings 는 건드리지 않음."""
+    """트랙 실패 시 (block_reasons, warnings, suppression, failed_closed).
+    findings 는 건드리지 않음.
+
+    failed_closed 는 '이 트랙 실패가 fail-closed 판정이었나'를 그대로 전달하는
+    플래그다. 호출부가 block_reasons 문구를 문자열 매칭해 차단 여부를 되짚으면,
+    아래 문구를 고치는 순간 blocked 가 조용히 False 로 바뀐다."""
     on_fail = ct.get("onTrackFailure", {})
     bypass_cfg = ct.get("bypass", {})
     ftype = cve_result.get("failure_type") or "scriptError"
@@ -614,11 +634,12 @@ def _handle_track_failure(cve_result, ct, policy):
             f"이 PR은 CVE 검증 없이 통과됩니다. 우회 사유를 PR 코멘트로 남겨 주세요."
         )
 
-    if behavior == "failClosed":
+    failed_closed = behavior == "failClosed"
+    if failed_closed:
         block_reasons.append(f"CVE 보정 트랙 실패({ftype}) — 안전하게 차단합니다(fail-closed).")
     else:
         warnings.append("CVE 검증 미수행")
-    return block_reasons, warnings, suppression
+    return block_reasons, warnings, suppression, failed_closed
 
 
 def apply_cve_track(decision: dict, cve_result: dict, policy: dict) -> dict:
@@ -674,16 +695,19 @@ def apply_cve_track(decision: dict, cve_result: dict, policy: dict) -> dict:
 
     # 트랙 실패 처리
     suppression = None
+    track_failed_closed = False
     if decision_cve is None:
-        fb_reasons, fb_warnings, suppression = _handle_track_failure(cve_result, ct, policy)
+        fb_reasons, fb_warnings, suppression, track_failed_closed = _handle_track_failure(
+            cve_result, ct, policy)
         warnings.extend(fb_warnings)
         if mode == "enforce":
             block_reasons.extend(fb_reasons)
         else:  # monitor
             warnings.extend(f"[monitor] {r}" for r in fb_reasons)
 
-    # blocked: findings 차단 OR (enforce 에서 트랙-실패 차단이 block_reasons 에 실린 경우)
-    track_failure_block = mode == "enforce" and any("CVE 보정 트랙 실패" in r for r in block_reasons)
+    # blocked: findings 차단 OR (enforce 에서 트랙-실패가 fail-closed 였던 경우).
+    # 판정 근거는 명시적 플래그로 전달받는다 — 사람이 읽는 문구에 의존하지 않는다.
+    track_failure_block = mode == "enforce" and track_failed_closed
     blocked = findings_blocked or track_failure_block
 
     decision["blocked"] = blocked
@@ -718,43 +742,79 @@ def apply_cve_track(decision: dict, cve_result: dict, policy: dict) -> dict:
 
 # ──────────────────────────────────────────────────────────────────
 def main():
-    summary  = load_json(resolve_report(SUMMARY_FILE.name,
-                                        env_var="SECURE_GATE_SUMMARY") or SUMMARY_FILE)
-    policy   = load_json(resolve_policy_file())
-    profile_file = resolve_profile_file()
-    if profile_file is not None:
-        if not profile_file.is_file():
-            print(f"[ERROR] 프로파일 파일 없음: {profile_file}", file=sys.stderr)
-            sys.exit(1)
-        policy = _deep_merge(policy, load_json(profile_file))
-    validate_policy(policy)
-    guides   = load_json(resolve_guide_file())
-
-    decision = evaluate(summary, policy, guides)
-
-    cve_result = load_cve_decision(policy)
+    # 입력 로딩 ~ evaluate() 전체를 감싼다. 여기서 예외가 나면 산출물이 아예 없어
+    # 잡은 빨갛지만 PR 댓글엔 아무 정보가 없다(리포팅 레벨 fail-blind). 예외를
+    # 삼키지 않고 ERROR 산출물을 반드시 쓴 뒤 fail-closed 차단한다.
+    # load_json/validate_policy 는 sys.exit(1) 로 fail-hard 하므로 SystemExit 도
+    # 함께 잡는다 — 차단이라는 결과는 그대로 두고 산출물만 추가하는 것이다(E-21).
+    summary = None
     try:
-        decision = apply_cve_track(decision, cve_result, policy)
-    except Exception as e:
-        # 보정 레이어의 어떤 예외도 게이트를 조용히 무너뜨리면 안 된다.
-        # 산출물(gate-decision.json)은 반드시 쓰고, 안전하게 차단(fail-closed)한다.
-        decision["blocked"] = True
-        decision["gate_status"] = "FAILED"
-        decision.setdefault("block_reasons", []).append(
-            f"CVE 보정 트랙 처리 중 예외 발생({type(e).__name__}) — "
-            f"안전하게 차단합니다(fail-closed)."
-        )
-        decision["cve_track"] = {
-            "mode": policy.get("cveTrack", {}).get("enabled", "off"),
-            "source": cve_result.get("source"),
-            "failure_type": cve_result.get("failure_type"),
-            "would_block": True,
-            "error": f"{type(e).__name__}: {e}",
+        summary  = load_json(resolve_report(SUMMARY_FILE.name,
+                                            env_var="SECURE_GATE_SUMMARY") or SUMMARY_FILE)
+        policy   = load_json(resolve_policy_file())
+        profile_file = resolve_profile_file()
+        if profile_file is not None:
+            if not profile_file.is_file():
+                print(f"[ERROR] 프로파일 파일 없음: {profile_file}", file=sys.stderr)
+                sys.exit(1)
+            policy = _deep_merge(policy, load_json(profile_file))
+        validate_policy(policy)
+        guides   = load_json(resolve_guide_file())
+
+        decision = evaluate(summary, policy, guides)
+    except (Exception, SystemExit) as e:
+        if isinstance(e, SystemExit):
+            err_txt = f"SystemExit(code={e.code}) — 입력·정책 로딩 단계의 fail-hard 종료"
+        else:
+            err_txt = f"{type(e).__name__}: {e}"
+        traceback.print_exc()
+        print(f"[ERROR] 게이트 실행 실패 — fail-closed 처리: {err_txt}", file=sys.stderr)
+
+        # 검사 요약 표가 전부 'Not Run' 으로 보이지 않도록, 이미 메모리에 있는
+        # aggregate 결과만 싣는다. 파일을 새로 읽지 않는다 — 그 로딩 실패가 바로
+        # 이 예외의 원인일 수 있어, 재시도는 같은 실패를 반복할 뿐이다.
+        reports = summary.get("reports", {}) if isinstance(summary, dict) else {}
+
+        tb_last = traceback.extract_tb(e.__traceback__)
+        where = (f"{tb_last[-1].filename}:{tb_last[-1].lineno} in {tb_last[-1].name}"
+                 if tb_last else "위치 불명")
+        decision = {
+            "gate_status":    "ERROR",
+            "blocked":        True,
+            "block_reasons":  ["게이트 실행 실패 — 판단 불가로 차단", err_txt],
+            "warnings":       [
+                "게이트가 끝까지 실행되지 않아 검사 결과를 신뢰할 수 없습니다. "
+                "Actions 로그를 확인하세요.",
+                f"예외 발생 위치: {where}",
+            ],
+            "total_findings": 0,
+            "reports":        reports,
+            "findings":       [],
         }
-        print(
-            f"[ERROR] CVE 보정 트랙 예외 — fail-closed 처리: {type(e).__name__}: {e}",
-            file=sys.stderr,
-        )
+    else:
+        cve_result = load_cve_decision(policy)
+        try:
+            decision = apply_cve_track(decision, cve_result, policy)
+        except Exception as e:
+            # 보정 레이어의 어떤 예외도 게이트를 조용히 무너뜨리면 안 된다.
+            # 산출물(gate-decision.json)은 반드시 쓰고, 안전하게 차단(fail-closed)한다.
+            decision["blocked"] = True
+            decision["gate_status"] = "FAILED"
+            decision.setdefault("block_reasons", []).append(
+                f"CVE 보정 트랙 처리 중 예외 발생({type(e).__name__}) — "
+                f"안전하게 차단합니다(fail-closed)."
+            )
+            decision["cve_track"] = {
+                "mode": policy.get("cveTrack", {}).get("enabled", "off"),
+                "source": cve_result.get("source"),
+                "failure_type": cve_result.get("failure_type"),
+                "would_block": True,
+                "error": f"{type(e).__name__}: {e}",
+            }
+            print(
+                f"[ERROR] CVE 보정 트랙 예외 — fail-closed 처리: {type(e).__name__}: {e}",
+                file=sys.stderr,
+            )
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     with open(DECISION_FILE, "w") as f:

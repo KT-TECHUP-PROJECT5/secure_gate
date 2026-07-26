@@ -68,6 +68,7 @@
       "annotateOnly": true,
       "promote": { "kev": true },
       "demote": {
+        "enabled": true,
         "requireNotKev": true,
         "maxEpss": 0.1,
         "minSeverity": "high",

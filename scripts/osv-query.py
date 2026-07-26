@@ -22,7 +22,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-SBOM_FILE = Path("security/sbom/mock-sbom.json")
+SBOM_FILE = Path("security/reports/sbom.cdx.json")   # C파트 SBOM 계약 (caller cwd)
 OUTPUT_FILE = Path("security/sbom/generated/osv-vulnerabilities.json")
 
 OSV_QUERYBATCH_URL = "https://api.osv.dev/v1/querybatch"
