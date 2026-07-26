@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import unittest
 from datetime import date
 from pathlib import Path
@@ -25,7 +26,7 @@ evaluate_gate = load_script_module(
 
 
 class ScannerNormalizationTests(unittest.TestCase):
-    def test_default_reports_exclude_dependency_track(self):
+    def test_default_reports_include_dependency_track(self):
         selected = aggregate_results.select_report_files("")
 
         self.assertEqual(
@@ -34,6 +35,7 @@ class ScannerNormalizationTests(unittest.TestCase):
                 "sast": "sast-report.json",
                 "secret_scan": "secret-report.json",
                 "dependency_scan": "dependency-report.json",
+                "dependency_track": "dependency-track-upload-report.json",
                 "runtime_validation": "runtime-report.json",
             },
             selected,
@@ -62,7 +64,7 @@ class ScannerNormalizationTests(unittest.TestCase):
                         },
                     }
                 ],
-                "errors": [{"message": "partial parse"}],
+                "errors": [{"message": "fatal scanner failure", "level": "error"}],
             },
         )
 
@@ -72,24 +74,36 @@ class ScannerNormalizationTests(unittest.TestCase):
         self.assertEqual("app.py:12", report["findings"][0]["location"])
         self.assertTrue(report["errors"])
 
-    def test_semgrep_partial_parse_warning_does_not_become_report_error(self):
+    def test_semgrep_partial_parsing_is_soft_warning(self):
         report = aggregate_results.normalize_report(
             "sast",
             {
-                "results": [],
+                "results": [
+                    {
+                        "check_id": "python.security.test",
+                        "path": "app.py",
+                        "start": {"line": 12},
+                        "extra": {
+                            "severity": "ERROR",
+                            "message": "Unsafe operation",
+                        },
+                    }
+                ],
                 "errors": [
                     {
+                        "code": 3,
                         "level": "warn",
-                        "type": "PartialParsing",
-                        "message": "Template was only partially parsed",
+                        "type": ["PartialParsing", []],
+                        "message": "Syntax error at line app/templates/login.html:1",
+                        "path": "app/templates/login.html",
                     }
                 ],
             },
         )
 
-        self.assertEqual("passed", report["status"])
+        self.assertEqual("failed", report["status"])
         self.assertEqual([], report["errors"])
-        self.assertEqual(1, len(report["warnings"]))
+        self.assertEqual(1, len(report.get("scanner_warnings") or []))
 
     def test_gitleaks_array_becomes_secret_findings(self):
         report = aggregate_results.normalize_report(
@@ -125,6 +139,9 @@ class ScannerNormalizationTests(unittest.TestCase):
                                 "FixedVersion": "1.0.1",
                                 "Severity": "CRITICAL",
                                 "Title": "Example vulnerability",
+                                "PkgIdentifier": {
+                                    "PURL": "pkg:npm/example@1.0.0"
+                                },
                             }
                         ],
                     }
@@ -139,6 +156,8 @@ class ScannerNormalizationTests(unittest.TestCase):
             "package-lock.json:example",
             report["findings"][0]["location"],
         )
+        self.assertEqual("pkg:npm/example@1.0.0", report["findings"][0]["purl"])
+        self.assertEqual("1.0.1", report["findings"][0]["fixedVersion"])
 
     def test_runtime_misconfig_findings_become_warning_status(self):
         report = aggregate_results.normalize_report(
@@ -173,6 +192,30 @@ class ScannerNormalizationTests(unittest.TestCase):
         self.assertEqual("passed", succeeded["status"])
         self.assertEqual("error", failed["status"])
         self.assertTrue(failed["errors"])
+
+    def test_dependency_track_skip_passes_unless_required(self):
+        skipped = aggregate_results.normalize_report(
+            "dependency_track",
+            {"status": "skipped", "reason": "upload-mode-never"},
+        )
+        self.assertEqual("passed", skipped["status"])
+        self.assertEqual([], skipped["errors"])
+
+        previous = os.environ.get("SECURE_GATE_REQUIRE_DT_UPLOAD")
+        os.environ["SECURE_GATE_REQUIRE_DT_UPLOAD"] = "true"
+        try:
+            required = aggregate_results.normalize_report(
+                "dependency_track",
+                {"status": "skipped", "reason": "upload-mode-never"},
+            )
+        finally:
+            if previous is None:
+                os.environ.pop("SECURE_GATE_REQUIRE_DT_UPLOAD", None)
+            else:
+                os.environ["SECURE_GATE_REQUIRE_DT_UPLOAD"] = previous
+
+        self.assertEqual("error", required["status"])
+        self.assertTrue(required["errors"])
 
     def test_unsupported_schema_is_a_report_error(self):
         report = aggregate_results.normalize_report("sast", {"unexpected": []})

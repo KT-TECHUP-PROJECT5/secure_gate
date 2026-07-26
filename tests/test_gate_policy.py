@@ -189,13 +189,45 @@ class EvaluateGatePolicyTests(unittest.TestCase):
             {
                 "has_error": True,
                 "total_findings": 0,
-                "reports": {},
+                "reports": {
+                    "sast": {
+                        "status": "error",
+                        "tool": "semgrep",
+                        "findings": [],
+                        "errors": ["fatal scanner failure"],
+                    }
+                },
             },
             POLICY,
         )
 
         self.assertTrue(decision["blocked"])
         self.assertEqual("FAILED", decision["gate_status"])
+        self.assertTrue(
+            any("보안 보고서 처리 실패: sast" in reason for reason in decision["block_reasons"])
+        )
+
+    def test_missing_report_reason_is_specific(self):
+        decision = evaluate_gate.evaluate(
+            {
+                "has_error": True,
+                "total_findings": 0,
+                "reports": {
+                    "dependency_track": {
+                        "status": "not_found",
+                        "tool": "dependency-track-upload-report.json",
+                        "findings": [],
+                    }
+                },
+            },
+            POLICY,
+        )
+
+        self.assertTrue(decision["blocked"])
+        self.assertIn(
+            "필수 보안 보고서 누락: dependency_track",
+            decision["block_reasons"],
+        )
 
 
 if __name__ == "__main__":

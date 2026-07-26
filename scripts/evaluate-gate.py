@@ -4,6 +4,9 @@ Evaluate normalized security findings against the Secure Gate policy.
 
 The team category policy is authoritative. Policy profiles only change how
 those categories are handled for PR, post-merge, and training workflows.
+
+Dependency CVE findings are additionally annotated or adjusted by cve_track
+after the category policy evaluation.
 """
 
 import argparse
@@ -17,6 +20,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
+import cve_track
 import gate_policy
 
 REPORTS_DIR = Path("security/reports")
@@ -261,6 +265,31 @@ def iter_findings(summary: dict):
                 yield report_name, finding
 
 
+def report_failure_reasons(summary: dict) -> list[str]:
+    """Build specific scanner/report failure reasons from summary.reports."""
+    reasons = []
+    for report_name, report in (summary.get("reports") or {}).items():
+        if not isinstance(report, dict):
+            continue
+        status = str(report.get("status") or "").lower()
+        errors = report.get("errors") or []
+        detail = ""
+        if isinstance(errors, list) and errors:
+            first = errors[0]
+            detail = f" ({first})" if isinstance(first, str) else ""
+
+        if status == "not_found":
+            reasons.append(f"필수 보안 보고서 누락: {report_name}")
+        elif status == "error":
+            reasons.append(f"보안 보고서 처리 실패: {report_name}{detail}")
+
+    if not reasons and summary.get("has_error"):
+        reasons.append(
+            "필수 보안 보고서가 누락되었거나 올바르게 처리되지 않았습니다."
+        )
+    return reasons
+
+
 def evaluate(
     summary: dict,
     policy: dict,
@@ -280,7 +309,6 @@ def evaluate(
     all_policy_errors = (
         list(policy_errors or []) + profile_errors + suppression_errors
     )
-
     blocked = False
     block_reasons = []
     warnings = []
@@ -298,10 +326,8 @@ def evaluate(
 
     if summary.get("has_error") and profile.get("blockOnScannerError", True):
         blocked = True
-        add_unique(
-            block_reasons,
-            "필수 보안 보고서가 누락되었거나 올바르게 처리되지 않았습니다.",
-        )
+        for reason in report_failure_reasons(summary):
+            add_unique(block_reasons, reason)
 
     for report_name, report in (summary.get("reports") or {}).items():
         if not isinstance(report, dict):
@@ -483,6 +509,18 @@ def main():
         policy_errors=suppression_errors,
     )
 
+    cve_result = cve_track.load_cve_decision(policy)
+    _, effective_policy, _ = resolve_profile(
+        policy,
+        decision["policy_profile"],
+    )
+    effective_policy["cveTrack"] = policy.get("cveTrack") or {}
+    decision = cve_track.apply_cve_track(
+        decision,
+        cve_result,
+        effective_policy,
+    )
+
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     with open(DECISION_FILE, "w", encoding="utf-8") as destination:
         json.dump(decision, destination, ensure_ascii=False, indent=2)
@@ -500,6 +538,15 @@ def main():
             f"{item.get('id', 'unknown')} "
             f"({item.get('expires_on', 'n/a')}): "
             f"{item.get('reason', 'suppressed')}"
+        )
+    cve_meta = decision.get("cve_track") or {}
+    if cve_meta:
+        print(
+            "  [CVE] "
+            f"mode={cve_meta.get('mode')} source={cve_meta.get('source')} "
+            f"promoted={cve_meta.get('promoted', 0)} "
+            f"demoted={cve_meta.get('demoted', 0)} "
+            f"applied={cve_meta.get('applied', 0)}"
         )
     print(f"  Total findings: {decision['total_findings']}")
 

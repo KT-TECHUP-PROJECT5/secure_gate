@@ -172,6 +172,9 @@ Post-merge에서는 CycloneDX SBOM 업로드 성공을 필수로 본다.
 `blockOnVulnCritical`, `blockOnVulnHigh`, `warnOnMedium`,
 `warnOnMisconfig`을 설정한다. PR과 Post-merge는 차단 기준이 같고,
 교육용 `training`만 고위험 vuln와 가용성 문제를 Warn으로 낮춘다.
+프로필과 별도로 최상위 `cveTrack`이 dependency CVE 보정 방식을
+설정한다. 현재 기본값은 `monitor`와 `annotateOnly=true`이므로
+CVE 근거를 기록하되 기존 Gate 판정은 바꾸지 않는다.
 
 | 항목 | 현재 코드 | 상태 |
 | --- | --- | --- |
@@ -179,10 +182,19 @@ Post-merge에서는 CycloneDX SBOM 업로드 성공을 필수로 본다.
 | Critical/High vuln | Block | 반영 |
 | misconfig (헤더/HTTP Only/캐시) | Warn | 반영 |
 | Secret / 가용성 / 스캐너 오류 | Block | 반영 |
+| dependency CVE 보정 | `cve_track` promote/demote (기본 monitor + annotateOnly) | 반영 |
+| Trivy `purl` / `fixedVersion` | aggregator 정규화 | 반영 |
 | PR vs Post-merge 차단 기준 | 동일 | 유지 |
 | 예외 승인 | `security/policies/suppressions.json` | 검증 및 판정 반영 |
 | AI 설명 | `generate-ai-security-summary.py` | Gate 이후 비차단 설명으로 반영 |
+| AI 보고서 참고 | `docs/AI-reference.md` | 반영 |
+| IR 플레이북 | `docs/incident-response-playbook.md` | 반영 |
 | ZAP XSS 탐지 고도화 | 별도 DAST 과제 | 보류 |
+
+CVE 트랙은 category 판정 **이후** dependency(`CVE-*`) finding만 보정한다.
+초기 기본값은 `monitor` + `annotateOnly=true`라서 판정을 바꾸지 않고
+`gate-decision.json`의 `cve_track` / `cve_adjustments`에 기록한다.
+상세: `docs/cve-track-integration.md`
 
 예외 파일 예시:
 

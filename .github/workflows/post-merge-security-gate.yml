@@ -532,9 +532,25 @@ jobs:
           path: security/reports
 
       - name: Aggregate post-merge results
+        env:
+          # Post-merge requires a real DT upload; intentional skips must fail-closed.
+          SECURE_GATE_REQUIRE_DT_UPLOAD: "true"
         run: |
           python3 .secure-gate/scripts/aggregate-results.py \
             --reports dependency_scan,dependency_track,runtime_validation
+
+      - name: Run CVE track (evidence)
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p security/sbom/generated
+          if [ ! -f security/reports/sbom.cdx.json ]; then
+            echo "SBOM missing — skipping CVE track evidence generation"
+            exit 0
+          fi
+          python3 .secure-gate/scripts/osv-query.py
+          python3 .secure-gate/scripts/cve-risk-assess.py
+          python3 .secure-gate/scripts/cve-policy-evaluate.py || true
 
       - name: Resolve policy file
         id: policy
@@ -567,4 +583,6 @@ jobs:
             security/reports/runtime-report.json
             security/reports/security-summary.json
             security/reports/gate-decision.json
+            security/reports/cve-policy-decision.json
+            security/sbom/generated/
           if-no-files-found: warn

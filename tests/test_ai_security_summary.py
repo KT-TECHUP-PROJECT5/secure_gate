@@ -94,6 +94,21 @@ class AiSecuritySummaryTests(unittest.TestCase):
         self.assertEqual(1, source["severity_counts"]["high"])
         self.assertEqual(1, source["severity_counts"]["secret"])
 
+    def test_scanner_warnings_are_included_in_source_coverage(self):
+        decision = self.make_decision()
+        decision["reports"]["runtime_validation"]["scanner_warnings"] = [
+            {"type": "PartialParsing"}
+        ]
+
+        source = ai_summary.build_source_payload(decision, max_findings=10)
+        runtime_status = next(
+            status
+            for status in source["report_statuses"]
+            if status["report"] == "runtime_validation"
+        )
+
+        self.assertEqual(2, runtime_status["warning_count"])
+
     def test_url_query_and_credentials_are_removed(self):
         source = ai_summary.build_source_payload(self.make_decision(), max_findings=10)
         runtime_finding = next(

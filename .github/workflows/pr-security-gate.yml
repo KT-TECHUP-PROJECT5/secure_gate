@@ -640,6 +640,20 @@ jobs:
           path: security/reports
         continue-on-error: true
 
+      - name: Download Dependency-Track upload report
+        uses: actions/download-artifact@v4
+        with:
+          name: dependency-track-upload-report
+          path: security/reports
+        continue-on-error: true
+
+      - name: Download SBOM
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom
+          path: security/reports
+        continue-on-error: true
+
       - name: Download runtime report
         uses: actions/download-artifact@v4
         with:
@@ -711,6 +725,19 @@ jobs:
       - name: Run Aggregator
         run: python .secure-gate/scripts/aggregate-results.py
 
+      - name: Run CVE track (evidence)
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p security/sbom/generated
+          if [ ! -f security/reports/sbom.cdx.json ]; then
+            echo "SBOM missing — skipping CVE track evidence generation"
+            exit 0
+          fi
+          python3 .secure-gate/scripts/osv-query.py
+          python3 .secure-gate/scripts/cve-risk-assess.py
+          python3 .secure-gate/scripts/cve-policy-evaluate.py || true
+
       - name: Run Gate Evaluator
         id: gate-eval
         env:
@@ -726,6 +753,8 @@ jobs:
           path: |
             security/reports/security-summary.json
             security/reports/gate-decision.json
+            security/reports/cve-policy-decision.json
+            security/sbom/generated/
 
       - name: Enforce Gate
         if: steps.gate-eval.outcome == 'failure'

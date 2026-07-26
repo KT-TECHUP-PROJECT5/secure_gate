@@ -55,18 +55,9 @@ REPORT_FILES = {
     "runtime_validation": "runtime-report.json",
 }
 
-DEFAULT_REPORT_KEYS = (
-    "build",
-    "sast",
-    "secret_scan",
-    "dependency_scan",
-    "runtime_validation",
-)
-
-
 def select_report_files(raw_value: str) -> dict[str, str]:
     if not raw_value.strip():
-        return {key: REPORT_FILES[key] for key in DEFAULT_REPORT_KEYS}
+        return dict(REPORT_FILES)
 
     keys = [key.strip() for key in raw_value.split(",") if key.strip()]
     unknown = [key for key in keys if key not in REPORT_FILES]
@@ -77,6 +68,39 @@ def select_report_files(raw_value: str) -> dict[str, str]:
 
 def finding_status(findings: list[dict]) -> str:
     return gate_policy.finding_report_status(findings, DEFAULT_POLICY)
+
+
+def _semgrep_error_type(error: object) -> str:
+    if not isinstance(error, dict):
+        return ""
+    err_type = error.get("type")
+    if isinstance(err_type, list) and err_type:
+        return str(err_type[0] or "")
+    if isinstance(err_type, str):
+        return err_type
+    return ""
+
+
+def classify_semgrep_errors(scanner_errors: object) -> tuple[list, list]:
+    """Split Semgrep errors into hard failures vs soft parse warnings.
+
+    Jinja/HTML PartialParsing warnings are common and must not fail-close the gate.
+    """
+    if not isinstance(scanner_errors, list):
+        return [], []
+
+    hard_errors = []
+    soft_errors = []
+    for error in scanner_errors:
+        err_type = _semgrep_error_type(error)
+        level = ""
+        if isinstance(error, dict):
+            level = str(error.get("level") or "").lower()
+        if err_type == "PartialParsing" or level == "warn":
+            soft_errors.append(error)
+        else:
+            hard_errors.append(error)
+    return hard_errors, soft_errors
 
 
 def normalize_semgrep(data: dict) -> dict:
@@ -106,28 +130,16 @@ def normalize_semgrep(data: dict) -> dict:
             )
         )
 
-    scanner_messages = data.get("errors")
-    if not isinstance(scanner_messages, list):
-        scanner_messages = []
-    scanner_errors = []
-    scanner_warnings = []
-    for message in scanner_messages:
-        level = "error"
-        if isinstance(message, dict):
-            level = str(message.get("level") or "error").strip().lower()
-        if level in {"warn", "warning", "info"}:
-            scanner_warnings.append(message)
-        else:
-            scanner_errors.append(message)
-
-    has_scanner_errors = bool(scanner_errors)
-    return {
-        "status": "error" if has_scanner_errors else finding_status(findings),
+    hard_errors, soft_errors = classify_semgrep_errors(data.get("errors"))
+    report = {
+        "status": "error" if hard_errors else finding_status(findings),
         "tool": "semgrep",
         "findings": findings,
-        "errors": scanner_errors,
-        "warnings": scanner_warnings,
+        "errors": hard_errors,
     }
+    if soft_errors:
+        report["scanner_warnings"] = soft_errors
+    return report
 
 
 def normalize_gitleaks(data: list) -> dict:
@@ -182,31 +194,34 @@ def normalize_trivy(data: dict) -> dict:
             package = str(vulnerability.get("PkgName") or "unknown-package")
             installed = str(vulnerability.get("InstalledVersion") or "unknown")
             fixed = str(vulnerability.get("FixedVersion") or "")
+            pkg_identifier = vulnerability.get("PkgIdentifier") or {}
+            purl = pkg_identifier.get("PURL") if isinstance(pkg_identifier, dict) else None
             description = (
                 f"{package}@{installed} is affected."
                 + (f" Fixed version: {fixed}." if fixed else "")
             )
-            findings.append(
-                gate_policy.with_category(
-                    {
-                        "id": str(
-                            vulnerability.get("VulnerabilityID")
-                            or "trivy.vulnerability"
-                        ),
-                        "severity": str(
-                            vulnerability.get("Severity") or "UNKNOWN"
-                        ).lower(),
-                        "category": "vuln",
-                        "title": str(
-                            vulnerability.get("Title")
-                            or vulnerability.get("VulnerabilityID")
-                            or "Trivy vulnerability"
-                        ),
-                        "description": description,
-                        "location": f"{target}:{package}",
-                    }
-                )
-            )
+            finding = {
+                "id": str(
+                    vulnerability.get("VulnerabilityID")
+                    or "trivy.vulnerability"
+                ),
+                "severity": str(
+                    vulnerability.get("Severity") or "UNKNOWN"
+                ).lower(),
+                "category": "vuln",
+                "title": str(
+                    vulnerability.get("Title")
+                    or vulnerability.get("VulnerabilityID")
+                    or "Trivy vulnerability"
+                ),
+                "description": description,
+                "location": f"{target}:{package}",
+            }
+            if purl:
+                finding["purl"] = str(purl)
+            if fixed:
+                finding["fixedVersion"] = fixed
+            findings.append(gate_policy.with_category(finding))
     return {
         "status": finding_status(findings),
         "tool": "trivy",
@@ -217,12 +232,34 @@ def normalize_trivy(data: dict) -> dict:
 def normalize_dependency_track(data: dict) -> dict:
     status = str(data.get("status") or "").lower()
     reason = str(data.get("reason") or "unknown")
-    succeeded = status == "succeeded"
+    require_upload = os.environ.get(
+        "SECURE_GATE_REQUIRE_DT_UPLOAD", ""
+    ).strip().lower() in {"1", "true", "yes"}
+
+    if status == "succeeded":
+        return {
+            "status": "passed",
+            "tool": "dependency-track",
+            "findings": [],
+            "errors": [],
+        }
+
+    # Intentional skip (never / main-only) is fine on soft gate.
+    # Post-merge sets SECURE_GATE_REQUIRE_DT_UPLOAD=true so skipped still fails.
+    if status == "skipped" and not require_upload:
+        return {
+            "status": "passed",
+            "tool": "dependency-track",
+            "findings": [],
+            "errors": [],
+            "notes": [f"dependency-track-upload-skipped:{reason}"],
+        }
+
     return {
-        "status": "passed" if succeeded else "error",
+        "status": "error",
         "tool": "dependency-track",
         "findings": [],
-        "errors": [] if succeeded else [f"dependency-track-upload-{status}:{reason}"],
+        "errors": [f"dependency-track-upload-{status}:{reason}"],
     }
 
 
@@ -288,7 +325,8 @@ def main():
         default=os.environ.get("SECURE_GATE_REPORTS", ""),
         help=(
             "Comma-separated report keys to require. "
-            "Default: build,sast,secret_scan,dependency_scan,runtime_validation"
+            "Default: build,sast,secret_scan,dependency_scan,"
+            "dependency_track,runtime_validation"
         ),
     )
     args = parser.parse_args()
@@ -321,7 +359,9 @@ def main():
     for key, filename in report_files.items():
         report = load_report(key, filename)
         summary["reports"][key] = report
-        if report.get("status") in {"error", "not_found"} or report.get("errors"):
+        # Only hard report failures trip has_error. Soft scanner warnings
+        # (e.g. Semgrep PartialParsing) must not fail-close the gate.
+        if report.get("status") in {"error", "not_found"}:
             summary["has_error"] = True
             summary["has_blockable"] = True
 

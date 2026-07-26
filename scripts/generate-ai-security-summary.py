@@ -224,7 +224,10 @@ def build_source_payload(decision, max_findings):
                         1 for finding in report_findings if isinstance(finding, dict)
                     ),
                     "error_count": len(report.get("errors") or []),
-                    "warning_count": len(report.get("warnings") or []),
+                    "warning_count": (
+                        len(report.get("warnings") or [])
+                        + len(report.get("scanner_warnings") or [])
+                    ),
                 }
             )
             for finding in report_findings:
