@@ -110,24 +110,43 @@ def normalize_file(filename: str, tool: str) -> None:
         print(f"[SKIP] {filename} 없음 — 건너뜀")
         return
 
-    with open(path) as f:
-        data = json.load(f)
+    try:
+        with open(path) as f:
+            data = json.load(f)
 
-    if is_common_schema(data):
-        print(f"[PASS] {filename} 이미 공통 스키마 — 변환 생략")
-        return
+        if is_common_schema(data):
+            print(f"[PASS] {filename} 이미 공통 스키마 — 변환 생략")
+            return
 
-    findings = NORMALIZERS[tool](data)
-    normalized = {
-        "status":   "failed" if findings else "passed",
-        "tool":     tool,
-        "findings": findings,
-    }
+        findings = NORMALIZERS[tool](data)
+        normalized = {
+            "status":   "failed" if findings else "passed",
+            "tool":     tool,
+            "findings": findings,
+        }
 
-    with open(path, "w") as f:
-        json.dump(normalized, f, indent=2, ensure_ascii=False)
+        with open(path, "w") as f:
+            json.dump(normalized, f, indent=2, ensure_ascii=False)
 
-    print(f"[OK] {filename} ({tool}) 변환 완료 — findings {len(findings)}건")
+        print(f"[OK] {filename} ({tool}) 변환 완료 — findings {len(findings)}건")
+    except Exception as e:
+        # 손상 JSON·예상 밖 구조로 여기서 죽으면 aggregate/evaluate 가 아예 실행되지
+        # 않아 gate-decision.json 이 없다(fail-blind). 예외를 삼키는 대신 공통 스키마
+        # error 리포트로 남겨, 하류가 dict 를 받고 status 로 "검사 실패"를 판정한다.
+        summary = f"{type(e).__name__}: {e}"
+        print(f"[ERROR] {filename} ({tool}) 변환 실패 — {summary}")
+        error_report = {
+            "status":   "error",
+            "tool":     tool,
+            "findings": [],
+            "error":    summary,
+        }
+        try:
+            with open(path, "w") as f:
+                json.dump(error_report, f, indent=2, ensure_ascii=False)
+        except OSError as write_err:
+            # 기록마저 실패해도 죽지 않는다. 파일 부재는 aggregate 가 not_found 로 잡는다.
+            print(f"[ERROR] {filename} error 리포트 기록 실패 — {write_err}")
 
 
 def main():

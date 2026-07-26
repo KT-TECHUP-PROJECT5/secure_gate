@@ -588,6 +588,9 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Run Normalizer
+        run: python .secure-gate/scripts/normalize-reports.py
+
       - name: Run Aggregator
         run: python .secure-gate/scripts/aggregate-results.py
 
