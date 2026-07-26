@@ -50,6 +50,11 @@ on:
         type: string
         required: false
         default: ""
+      dast_scan_path:
+        description: DAST entry path appended to the runtime base URL
+        type: string
+        required: false
+        default: "/"
       policy_path:
         description: Policy file path relative to caller repo (empty = use Secure Gate default)
         type: string
@@ -453,7 +458,7 @@ jobs:
           echo $! > /tmp/secure-gate-app.pid
           TARGET="http://127.0.0.1:${{ inputs.app_port }}${{ inputs.health_path }}"
           echo "Waiting for app at ${TARGET}"
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             if curl -fsS "$TARGET" >/dev/null 2>&1; then
               echo "App is ready"
               exit 0
@@ -465,14 +470,39 @@ jobs:
 
       - name: Resolve DAST target URL
         id: dast-target
+        env:
+          INPUT_TARGET_URL: ${{ inputs.target_url }}
+          INPUT_START_COMMAND: ${{ inputs.start_command }}
+          APP_PORT: ${{ inputs.app_port }}
+          DAST_SCAN_PATH: ${{ inputs.dast_scan_path }}
         run: |
-          if [ -n "${{ inputs.target_url }}" ]; then
-            echo "url=${{ inputs.target_url }}" >> "$GITHUB_OUTPUT"
-          elif [ -n "${{ inputs.start_command }}" ]; then
-            echo "url=http://127.0.0.1:${{ inputs.app_port }}" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          if [ -n "$INPUT_TARGET_URL" ]; then
+            BASE_URL="${INPUT_TARGET_URL%/}"
+          elif [ -n "$INPUT_START_COMMAND" ]; then
+            BASE_URL="http://127.0.0.1:${APP_PORT}"
           else
             echo "url=" >> "$GITHUB_OUTPUT"
+            echo "scan_url=" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+
+          case "$DAST_SCAN_PATH" in
+            http://*|https://*)
+              SCAN_URL="$DAST_SCAN_PATH"
+              ;;
+            /*)
+              SCAN_URL="${BASE_URL}${DAST_SCAN_PATH}"
+              ;;
+            *)
+              SCAN_URL="${BASE_URL}/${DAST_SCAN_PATH}"
+              ;;
+          esac
+
+          echo "url=$BASE_URL" >> "$GITHUB_OUTPUT"
+          echo "scan_url=$SCAN_URL" >> "$GITHUB_OUTPUT"
+          echo "Runtime base URL: $BASE_URL"
+          echo "DAST scan URL: $SCAN_URL"
 
       - name: Verify runtime target health
         if: inputs.enable_dast && steps.dast-target.outputs.url != ''
@@ -480,7 +510,7 @@ jobs:
           set -euo pipefail
           TARGET_URL="${{ steps.dast-target.outputs.url }}"
           HEALTH_URL="${TARGET_URL%/}${{ inputs.health_path }}"
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             if curl --fail --silent --show-error "$HEALTH_URL" >/dev/null; then
               echo "Runtime target is healthy: ${HEALTH_URL}"
               exit 0
@@ -502,7 +532,7 @@ jobs:
         run: |
           python3 .secure-gate/scripts/run-zap-validation.py \
             --profile pr \
-            --target-url "${{ steps.dast-target.outputs.url }}" \
+            --target-url "${{ steps.dast-target.outputs.scan_url }}" \
             --reports-dir security/reports
 
       - name: Run Nuclei PR validation
@@ -510,7 +540,7 @@ jobs:
         run: |
           python3 .secure-gate/scripts/run-nuclei-validation.py \
             --profile pr \
-            --target-url "${{ steps.dast-target.outputs.url }}" \
+            --target-url "${{ steps.dast-target.outputs.scan_url }}" \
             --trivy-report security/reports/dependency-report.json \
             --reports-dir security/reports
 

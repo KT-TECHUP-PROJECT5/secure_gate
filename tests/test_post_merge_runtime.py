@@ -109,6 +109,87 @@ class NucleiProfileTests(unittest.TestCase):
         self.assertEqual("none", args.tags)
         self.assertEqual("none", args.docker_network)
         self.assertEqual(30 * 60, args.scan_timeout)
+        self.assertFalse(args.require_trivy_report)
+
+    def test_post_merge_ignores_existing_trivy_report_and_runs_only_base_scan(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            reports_dir = Path(temporary_directory) / "reports"
+            converter = Path(temporary_directory) / "trivy-to-nuclei.py"
+            converter.write_text("# test converter\n", encoding="utf-8")
+            reports_dir.mkdir(parents=True)
+            trivy_report = reports_dir / "dependency-report.json"
+            trivy_report.write_text(
+                json.dumps(
+                    {
+                        "Results": [
+                            {
+                                "Vulnerabilities": [
+                                    {
+                                        "VulnerabilityID": "CVE-2099-0001",
+                                        "Severity": "CRITICAL",
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(
+                profile="post-merge",
+                target_url="https://staging.example.com/posts",
+                trivy_report=trivy_report,
+                reports_dir=reports_dir,
+                converter=converter,
+                nuclei_image="nuclei:test",
+                docker_network="none",
+                template_volume="none",
+                severities="low,medium,high,critical",
+                tags="none",
+                trivy_severities="HIGH,CRITICAL",
+                rate_limit=20,
+                concurrency=10,
+                bulk_size=10,
+                retries=1,
+                request_timeout=10,
+                scan_timeout=30,
+                template_list_timeout=30,
+                enable_interactsh=True,
+                show_stats=False,
+                require_trivy_report=True,
+            )
+
+            with mock.patch.object(
+                nuclei_validation,
+                "parse_args",
+                return_value=args,
+            ):
+                with mock.patch.object(
+                    nuclei_validation,
+                    "run_trivy_converter",
+                ) as run_converter:
+                    with mock.patch.object(
+                        nuclei_validation,
+                        "run_process",
+                        return_value=SimpleNamespace(returncode=0),
+                    ) as run_process:
+                        exit_code = nuclei_validation.main()
+
+            coverage = json.loads(
+                (reports_dir / "nuclei-cve-coverage.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+
+        self.assertEqual(0, exit_code)
+        self.assertEqual(1, run_process.call_count)
+        run_converter.assert_not_called()
+        self.assertEqual("skipped", coverage["status"])
+        self.assertEqual(
+            "disabled-for-post-merge-full-scan",
+            coverage["reason"],
+        )
+        self.assertEqual(0, coverage["trivy_candidates"])
 
 
 class ZapProfileTests(unittest.TestCase):

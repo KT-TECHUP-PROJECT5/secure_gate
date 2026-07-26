@@ -51,6 +51,10 @@ DISABLED_VALUES = {"none", "off", "false", "disable", "disabled"}
 SUPPORTED_REQUIRED_REPORTS = {"zap", "nuclei", "nuclei-coverage", "dynatrace"}
 
 
+class AuthenticationError(RuntimeError):
+    """Raised when an authenticated custom check cannot establish a session."""
+
+
 def make_finding(finding_id, severity, title, description, location, category=None):
     finding = {
         "id": finding_id,
@@ -482,25 +486,81 @@ def check_search_sqli(base_url, timeout, payload):
 
 def create_session_opener():
     cookie_jar = http.cookiejar.CookieJar()
-    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPCookieProcessor(cookie_jar)
+    )
+    opener.cookie_jar = cookie_jar
+    return opener
 
 
-def login(base_url, username, password, timeout):
+def login(
+    base_url,
+    username,
+    password,
+    timeout,
+    verify_path,
+    logged_in_markers,
+):
+    if not username.strip() or not password:
+        raise AuthenticationError(
+            "Authenticated custom checks require a username and password."
+        )
+
     opener = create_session_opener()
     login_url = join_url(base_url, "/login")
-    status_code, _, response_body = request_text(
-        login_url,
-        "POST",
-        timeout,
-        data={"username": username, "password": password},
-        opener=opener,
-    )
-    return opener, status_code, response_body
-
-
-def check_admin_access(base_url, timeout, username, password):
     try:
-        opener, _, _ = login(base_url, username, password, timeout)
+        login_status, _, _ = request_text(
+            login_url,
+            "POST",
+            timeout,
+            data={"username": username, "password": password},
+            opener=opener,
+        )
+        verify_url = join_url(base_url, verify_path)
+        verify_status, _, verify_body = request_text(
+            verify_url,
+            "GET",
+            timeout,
+            opener=opener,
+        )
+    except RuntimeError as error:
+        raise AuthenticationError(f"Authentication request failed: {error}") from error
+
+    if login_status < 200 or login_status >= 400:
+        raise AuthenticationError(
+            f"Login endpoint returned unexpected status {login_status}."
+        )
+    if verify_status != 200:
+        raise AuthenticationError(
+            f"Login verification endpoint returned status {verify_status}."
+        )
+    if logged_in_markers and not any(
+        marker in verify_body for marker in logged_in_markers
+    ):
+        raise AuthenticationError(
+            "Login verification response did not contain a configured "
+            "logged-in marker."
+        )
+
+    return opener
+
+
+def make_authentication_failure_finding(base_url, error):
+    return make_finding(
+        "runtime.custom.authentication.failed",
+        "high",
+        "Authenticated runtime checks could not log in",
+        (
+            "The configured test account could not establish a verified login "
+            f"session. Authenticated coverage is incomplete: {error}"
+        ),
+        join_url(base_url, "/login"),
+        category="scanner-error",
+    )
+
+
+def check_admin_access(base_url, timeout, username, opener):
+    try:
         admin_url = join_url(base_url, "/admin")
         status_code, _, response_body = request_text(admin_url, "GET", timeout, opener=opener)
     except RuntimeError as error:
@@ -529,9 +589,8 @@ def check_admin_access(base_url, timeout, username, password):
     return []
 
 
-def check_idor(base_url, timeout, username, password, private_post_id):
+def check_idor(base_url, timeout, username, private_post_id, opener):
     try:
-        opener, _, _ = login(base_url, username, password, timeout)
         idor_url = join_url(base_url, f"/posts/private/{private_post_id}")
         status_code, _, response_body = request_text(idor_url, "GET", timeout, opener=opener)
     except RuntimeError as error:
@@ -580,25 +639,39 @@ def check_custom_runtime(base_url, args):
         findings.extend(check_reflected_xss(base_url, args.timeout))
     if "search-sqli" in checks:
         findings.extend(check_search_sqli(base_url, args.timeout, args.custom_sqli_payload))
-    if "admin-access" in checks:
-        findings.extend(
-            check_admin_access(
+    authenticated_checks = {"admin-access", "idor"}.intersection(checks)
+    if authenticated_checks:
+        try:
+            opener = login(
                 base_url,
-                args.timeout,
                 args.custom_username,
                 args.custom_password,
-            )
-        )
-    if "idor" in checks:
-        findings.extend(
-            check_idor(
-                base_url,
                 args.timeout,
-                args.custom_username,
-                args.custom_password,
-                args.custom_private_post_id,
+                args.custom_login_verify_path,
+                split_csv(args.custom_logged_in_markers),
             )
-        )
+        except AuthenticationError as error:
+            findings.append(make_authentication_failure_finding(base_url, error))
+        else:
+            if "admin-access" in authenticated_checks:
+                findings.extend(
+                    check_admin_access(
+                        base_url,
+                        args.timeout,
+                        args.custom_username,
+                        opener,
+                    )
+                )
+            if "idor" in authenticated_checks:
+                findings.extend(
+                    check_idor(
+                        base_url,
+                        args.timeout,
+                        args.custom_username,
+                        args.custom_private_post_id,
+                        opener,
+                    )
+                )
 
     return findings
 
@@ -1285,6 +1358,18 @@ def parse_args():
     parser.add_argument(
         "--custom-private-post-id",
         default=env_or_default("CUSTOM_RUNTIME_PRIVATE_POST_ID", "4"),
+    )
+    parser.add_argument(
+        "--custom-login-verify-path",
+        default=env_or_default("CUSTOM_RUNTIME_LOGIN_VERIFY_PATH", "/posts"),
+    )
+    parser.add_argument(
+        "--custom-logged-in-markers",
+        default=env_or_default(
+            "CUSTOM_RUNTIME_LOGGED_IN_MARKERS",
+            "로그아웃,/logout",
+        ),
+        help="Comma-separated markers expected only in an authenticated response.",
     )
     parser.add_argument(
         "--custom-sqli-payload",

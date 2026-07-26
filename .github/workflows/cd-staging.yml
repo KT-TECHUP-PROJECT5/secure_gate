@@ -14,8 +14,16 @@ jobs:
       gate_repository: ${{ github.repository }}
       gate_ref: ${{ github.sha }}
       target_url: ${{ vars.STAGING_URL }}
+      scan_path: /posts
       health_path: /posts
+      health_expected_status: "200"
       smoke_paths: /login=200,/posts=200,/upload=200|303,/docs=200,/redoc=200
+      custom_checks: debug-exposure,docs-exposure,reflected-xss,search-sqli,admin-access,idor
+      custom_username: user1
+      custom_login_verify_path: /posts
+      custom_logged_in_markers: 로그아웃,/logout
+      zap_auth_plan: .secure-gate/security/zap/secure-gate-auth-plan.yaml
+      zap_auth_username: user1
       dynatrace_environment_url: ${{ vars.DYNATRACE_ENV_URL }}
       dynatrace_problem_selector: ${{ vars.DYNATRACE_PROBLEM_SELECTOR }}
       dynatrace_entity_selector: ${{ vars.DYNATRACE_ENTITY_SELECTOR }}
@@ -24,3 +32,5 @@ jobs:
       DEPENDENCY_TRACK_URL: ${{ secrets.DEPENDENCY_TRACK_URL }}
       DEPENDENCY_TRACK_API_KEY: ${{ secrets.DEPENDENCY_TRACK_API_KEY }}
       DYNATRACE_TOKEN: ${{ secrets.DYNATRACE_TOKEN }}
+      ZAP_AUTH_PASSWORD: ${{ secrets.ZAP_AUTH_PASSWORD }}
+      CUSTOM_RUNTIME_PASSWORD: ${{ secrets.CUSTOM_RUNTIME_PASSWORD }}

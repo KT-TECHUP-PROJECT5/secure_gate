@@ -157,6 +157,7 @@ jobs:
 | `app_port` | `3000` | runner-local 포트 |
 | `health_path` | `/health` | readiness 경로 |
 | `target_url` | `""` | 외부 Preview/Staging URL (있으면 localhost 대신 사용) |
+| `dast_scan_path` | `/` | PR DAST 시작 경로. Base URL과 분리하며 취약 앱은 `/posts`처럼 지정 |
 | `policy_path` | `""` | caller 정책 경로 (비어 있으면 기본/로컬 정책) |
 | `node_version` | `20` | Node 기반 install/build/start 시 사용 |
 | `dockerfile_path` | `""` | Dockerfile 경로. 비어 있으면 루트 `Dockerfile` → `dockerfile`만 자동 탐색 (하위 경로 자동 선택 안 함) |
@@ -175,6 +176,8 @@ jobs:
 | `DEPENDENCY_TRACK_URL` | Post-merge 필수 | Dependency-Track **Backend API** base URL (UI 전용 주소 아님) |
 | `DEPENDENCY_TRACK_API_KEY` | Post-merge 필수 | Dependency-Track API Key |
 | `DYNATRACE_TOKEN` | Post-merge 필수 | Post-merge Reusable Workflow에서 Problems와 Service entities 조회 |
+| `ZAP_AUTH_PASSWORD` | 인증 ZAP 사용 시 필수 | ZAP Automation Framework 테스트 계정 비밀번호 |
+| `CUSTOM_RUNTIME_PASSWORD` | 인증 Custom Check 사용 시 필수 | Admin/IDOR 검사 테스트 계정 비밀번호 |
 
 PR에서는 Dependency-Track 업로드를 생략한다. Post-merge에서는 URL/API Key와
 SBOM 업로드 성공을 필수로 요구하며 실패 또는 skip 시 Gate를 차단한다.

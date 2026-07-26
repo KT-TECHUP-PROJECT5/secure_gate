@@ -17,11 +17,21 @@ on:
         description: Deployed staging URL to validate
         type: string
         required: true
+      scan_path:
+        description: DAST entry path appended to target_url
+        type: string
+        required: false
+        default: "/"
       health_path:
         description: Health endpoint path
         type: string
         required: false
         default: "/health"
+      health_expected_status:
+        description: Expected HTTP status for the health endpoint
+        type: string
+        required: false
+        default: "200"
       smoke_paths:
         description: Comma-separated smoke paths with optional expected status
         type: string
@@ -37,6 +47,31 @@ on:
         type: string
         required: false
         default: "none"
+      custom_username:
+        description: Username for authenticated custom runtime checks
+        type: string
+        required: false
+        default: ""
+      custom_login_verify_path:
+        description: Path used to verify the authenticated custom-check session
+        type: string
+        required: false
+        default: "/posts"
+      custom_logged_in_markers:
+        description: Comma-separated response markers proving login success
+        type: string
+        required: false
+        default: "로그아웃,/logout"
+      zap_auth_plan:
+        description: Optional authenticated ZAP Automation Framework plan
+        type: string
+        required: false
+        default: ""
+      zap_auth_username:
+        description: Username for the authenticated ZAP user
+        type: string
+        required: false
+        default: ""
       dockerfile_path:
         description: Dockerfile path for the post-merge dependency scan
         type: string
@@ -88,6 +123,12 @@ on:
       DYNATRACE_TOKEN:
         description: Dynatrace token with problems.read and entities.read
         required: true
+      ZAP_AUTH_PASSWORD:
+        description: Password for the authenticated ZAP user
+        required: false
+      CUSTOM_RUNTIME_PASSWORD:
+        description: Password for authenticated custom runtime checks
+        required: false
 
 jobs:
   post-merge-dependency:
@@ -250,6 +291,12 @@ jobs:
       - name: Validate post-merge configuration
         env:
           TARGET_URL: ${{ inputs.target_url }}
+          ZAP_AUTH_PLAN: ${{ inputs.zap_auth_plan }}
+          ZAP_AUTH_USERNAME: ${{ inputs.zap_auth_username }}
+          ZAP_AUTH_PASSWORD: ${{ secrets.ZAP_AUTH_PASSWORD }}
+          CUSTOM_CHECKS: ${{ inputs.custom_checks }}
+          CUSTOM_RUNTIME_USERNAME: ${{ inputs.custom_username }}
+          CUSTOM_RUNTIME_PASSWORD: ${{ secrets.CUSTOM_RUNTIME_PASSWORD }}
           DYNATRACE_ENV_URL: ${{ inputs.dynatrace_environment_url }}
           DYNATRACE_PROBLEM_SELECTOR: ${{ inputs.dynatrace_problem_selector }}
           DYNATRACE_ENTITY_SELECTOR: ${{ inputs.dynatrace_entity_selector }}
@@ -287,17 +334,84 @@ jobs:
                       file=sys.stderr,
                   )
                   raise SystemExit(2)
+
+          auth_plan = os.environ["ZAP_AUTH_PLAN"].strip()
+          if auth_plan:
+              missing_auth = [
+                  name
+                  for name in ("ZAP_AUTH_USERNAME", "ZAP_AUTH_PASSWORD")
+                  if not os.environ[name].strip()
+              ]
+              if missing_auth:
+                  print(
+                      "[ERROR] Authenticated ZAP requires: "
+                      + ", ".join(missing_auth),
+                      file=sys.stderr,
+                  )
+                  raise SystemExit(2)
+
+          custom_checks = {
+              value.strip()
+              for value in os.environ["CUSTOM_CHECKS"].split(",")
+              if value.strip()
+          }
+          if custom_checks.intersection({"admin-access", "idor"}):
+              missing_custom_auth = [
+                  name
+                  for name in (
+                      "CUSTOM_RUNTIME_USERNAME",
+                      "CUSTOM_RUNTIME_PASSWORD",
+                  )
+                  if not os.environ[name].strip()
+              ]
+              if missing_custom_auth:
+                  print(
+                      "[ERROR] Authenticated custom checks require: "
+                      + ", ".join(missing_custom_auth),
+                      file=sys.stderr,
+                  )
+                  raise SystemExit(2)
           PY
 
-      - name: Verify staging health
+      - name: Resolve runtime scan URL
+        id: runtime-target
         env:
           TARGET_URL: ${{ inputs.target_url }}
+          SCAN_PATH: ${{ inputs.scan_path }}
+        run: |
+          set -euo pipefail
+          BASE_URL="${TARGET_URL%/}"
+          case "$SCAN_PATH" in
+            http://*|https://*)
+              SCAN_URL="$SCAN_PATH"
+              ;;
+            /*)
+              SCAN_URL="${BASE_URL}${SCAN_PATH}"
+              ;;
+            *)
+              SCAN_URL="${BASE_URL}/${SCAN_PATH}"
+              ;;
+          esac
+          echo "base_url=$BASE_URL" >> "$GITHUB_OUTPUT"
+          echo "scan_url=$SCAN_URL" >> "$GITHUB_OUTPUT"
+          echo "Runtime base URL: $BASE_URL"
+          echo "DAST scan URL: $SCAN_URL"
+
+      - name: Verify staging health
+        id: staging-health
+        env:
+          TARGET_URL: ${{ steps.runtime-target.outputs.base_url }}
           HEALTH_PATH: ${{ inputs.health_path }}
+          HEALTH_EXPECTED_STATUS: ${{ inputs.health_expected_status }}
         run: |
           set -euo pipefail
           HEALTH_URL="${TARGET_URL%/}${HEALTH_PATH}"
-          for i in $(seq 1 30); do
-            if curl --fail --silent --show-error "$HEALTH_URL" >/dev/null; then
+          for _ in $(seq 1 30); do
+            STATUS="$(
+              curl --silent --show-error --output /dev/null \
+                --write-out '%{http_code}' "$HEALTH_URL" || true
+            )"
+            if [ "$STATUS" = "$HEALTH_EXPECTED_STATUS" ]; then
               echo "Staging is healthy: ${HEALTH_URL}"
               exit 0
             fi
@@ -307,8 +421,13 @@ jobs:
           exit 1
 
       - name: Run ZAP post-merge validation
+        if: steps.staging-health.outcome == 'success'
         env:
-          TARGET_URL: ${{ inputs.target_url }}
+          TARGET_URL: ${{ steps.runtime-target.outputs.scan_url }}
+          ZAP_AUTH_PLAN: ${{ inputs.zap_auth_plan }}
+          ZAP_AUTH_CONTEXT_URL: ${{ steps.runtime-target.outputs.base_url }}
+          ZAP_AUTH_USERNAME: ${{ inputs.zap_auth_username }}
+          ZAP_AUTH_PASSWORD: ${{ secrets.ZAP_AUTH_PASSWORD }}
         run: |
           python3 .secure-gate/scripts/run-zap-validation.py \
             --profile post-merge \
@@ -316,8 +435,9 @@ jobs:
             --reports-dir security/reports
 
       - name: Run Nuclei post-merge validation
+        if: always() && steps.staging-health.outcome == 'success'
         env:
-          TARGET_URL: ${{ inputs.target_url }}
+          TARGET_URL: ${{ steps.runtime-target.outputs.scan_url }}
         run: |
           python3 .secure-gate/scripts/run-nuclei-validation.py \
             --profile post-merge \
@@ -325,6 +445,7 @@ jobs:
             --reports-dir security/reports
 
       - name: Fetch Dynatrace runtime results
+        if: always()
         env:
           DYNATRACE_API_TOKEN: ${{ secrets.DYNATRACE_TOKEN }}
           DYNATRACE_ENV_URL: ${{ inputs.dynatrace_environment_url }}
@@ -338,15 +459,21 @@ jobs:
       - name: Generate and enforce runtime validation report
         if: always()
         env:
-          TARGET_URL: ${{ inputs.target_url }}
+          TARGET_URL: ${{ steps.runtime-target.outputs.base_url }}
           HEALTH_PATH: ${{ inputs.health_path }}
+          HEALTH_EXPECTED_STATUS: ${{ inputs.health_expected_status }}
           SMOKE_PATHS: ${{ inputs.smoke_paths }}
           REQUIRED_HEADERS: ${{ inputs.required_headers }}
           CUSTOM_CHECKS: ${{ inputs.custom_checks }}
+          CUSTOM_RUNTIME_USERNAME: ${{ inputs.custom_username }}
+          CUSTOM_RUNTIME_PASSWORD: ${{ secrets.CUSTOM_RUNTIME_PASSWORD }}
+          CUSTOM_RUNTIME_LOGIN_VERIFY_PATH: ${{ inputs.custom_login_verify_path }}
+          CUSTOM_RUNTIME_LOGGED_IN_MARKERS: ${{ inputs.custom_logged_in_markers }}
         run: |
           python3 .secure-gate/scripts/runtime-validation.py \
             --base-url "$TARGET_URL" \
             --health-path "$HEALTH_PATH" \
+            --health-expected-status "$HEALTH_EXPECTED_STATUS" \
             --smoke-paths "$SMOKE_PATHS" \
             --required-headers "$REQUIRED_HEADERS" \
             --custom-checks "$CUSTOM_CHECKS" \
