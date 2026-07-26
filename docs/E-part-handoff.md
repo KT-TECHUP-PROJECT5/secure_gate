@@ -587,6 +587,54 @@ reusable workflow의 `download-artifact`가 caller 루트에 풀면 `security/re
   `source` 필드(zap/nuclei/dynatrace)를 추가하고 게이트가 finding 레벨로 매핑하도록
   확장(D파트 runtime-validation + E파트 게이트 공동).
 
+### 5.4 origin 리포에 브랜치 보호가 없어 게이트가 Merge를 막지 못함
+- **증상**: `KT-TECHUP-PROJECT5/secure_gate`의 `main`이 `"protected": false`이고
+  rulesets도 비어 있다(`[]`). **required status check가 0개다.**
+- **영향**: 게이트 판정이 아무리 정확해도 **강제력이 0이다.** `blocked=true` / `rc=1`
+  로 정확히 차단해도 Merge 버튼은 그대로 열려 있다. 1회차 실측에서 4개 영역이
+  Not Run인 채 Merge가 허용된 것도 이 조건과 겹친다 — 판정 로직을 고쳐도 이건
+  안 고쳐진다. **코드로 해결할 수 없는 항목**이라 ADR-008과 같은 성격의 팀 공유 건이다.
+- **현재 대응**: 없음(리포 설정 영역). 리포 관리자가 브랜치 보호 + required check를
+  등록해야 한다. 켤 때 **함께** 처리할 것 — `needs` 실패로 스킵된 잡은 conclusion이
+  `skipped`이고, required status check 평가는 이를 **통과로 취급**한다. 스캔 잡이
+  깨져 `aggregate-and-gate`가 스킵되면 게이트 없이 Merge가 허용돼 1회차와 같은
+  결과가 된다. 게이트 잡에 `if: always()` + `needs.*.result` 명시 평가가 필요하다.
+- **검증 한계**: 개인 fork(`9vin9/secure-gate-test`)는 private + 개인 무료 플랜이라
+  브랜치 보호 기능 자체를 못 켠다(API 403). 스킵 취급 동작은 **실측하지 못했고**
+  문서화된 GitHub 동작에 근거한 것이다.
+
+### 5.5 PR 체크 이름에 `secure-pr-gate / ` 접두어가 붙음
+- **증상**: `pr-security-gate.yml`은 reusable workflow이고 `call-pr-security-gate.yml`의
+  `secure-pr-gate` 잡이 호출한다. 그래서 PR에 뜨는 체크 이름은 잡 이름 그대로가
+  아니라 caller 잡 id가 접두어로 붙은 형태다.
+- **영향**: required check를 `Aggregate & Gate Evaluation`처럼 **잡 이름 그대로 등록하면
+  영원히 매칭되지 않는다.** 등록은 됐는데 강제가 안 되거나 영구 pending으로 남는다.
+  5.4를 실행할 때 바로 밟는 함정이다.
+- **현재 대응**: 등록해야 할 7개 전체 이름은 아래와 같다.
+  ```
+  secure-pr-gate / Build / Test
+  secure-pr-gate / SAST (Semgrep)
+  secure-pr-gate / Secret Scan (Gitleaks)
+  secure-pr-gate / Dependency Scan (Trivy)
+  secure-pr-gate / Runtime Validation
+  secure-pr-gate / Aggregate & Gate Evaluation
+  secure-pr-gate / PR Comment
+  ```
+  caller의 잡 id(`secure-pr-gate`)를 바꾸면 7개 이름이 전부 바뀌므로, 보호 규칙을
+  켠 뒤에는 caller 잡 id를 함부로 바꾸지 말 것.
+
+### 5.6 `gate_status` enum이 팀 계약에 정의돼 있지 않음
+- **증상**: `docs/team-interface.md`의 공통 스키마에 `gate_status` **정의 자체가 없다.**
+  리포에서 값을 언급하는 곳은 `policy-validation-matrix.md:101`의 `gate_status=FAILED`
+  하나뿐이다. 여기에 산출물 보장(fail-blind 해소)으로 **`ERROR`가 새로 추가됐다.**
+  현재 값은 `PASSED` / `FAILED` / `ERROR` 셋이다.
+- **영향**: 팀에 다른 소비자(대시보드·알림·집계)가 생겼을 때 `PASSED`/`FAILED`만
+  가정하고 분기하면 `ERROR`를 오독한다. "FAILED가 아니니 통과"로 처리하는 코드가
+  하나라도 있으면 **판단 불가 상태가 통과로 뒤집힌다** — 조용한 통과 금지 원칙 위반.
+- **현재 대응**: `create-pr-comment.py`는 `PASSED`만 ✅이고 나머지는 전부 ❌로 떨어져
+  안전하다(fail-closed 렌더). 정식 해소는 `team-interface.md` 공통 스키마에 세 값을
+  enum으로 명시하는 것(A파트 계약 문서). **팀 공유 대상.**
+
 ---
 
 ## 6. 남은 작업

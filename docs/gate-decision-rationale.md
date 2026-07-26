@@ -15,6 +15,12 @@
    > 용어: **fail-closed**=실패 시 차단 · **fail-open**=실패 시 통과 · **fail-hard**=설정
    > 오류 시 즉시 중단(exit) · **fail-safe**=불확실하면 안전한 쪽으로.
 
+   > ⚠️ **번호 체계 주의.** 이 문서의 항목 번호(A-1, A-2, … H-30e)와 게이트 감사
+   > 30항목의 번호(A1, A2, …)는 **서로 다른 체계**다. 예를 들어 이 문서의 `A-2`는
+   > "Gitleaks 원본 severity 무시"지만, 감사의 `A2`는 "demote 정책 키 부재 시 조용한
+   > 강등"(이 문서에서는 D-15 참고)이다. 하이픈 유무로 구분되지 않으니 외부 문서·
+   > 리뷰 코멘트에서 "A2"를 참조받으면 **어느 체계인지 먼저 확인할 것.**
+
 ---
 
 ## A. 등급 정규화
@@ -153,6 +159,17 @@ DISPLAY_ORDER로 따로 둔다.
 있으면(KEV거나, EPSS 높거나, 고칠 수 있거나, critical이면) 강등하지 않는다.
 ③ 다르게 하면(OR): 조건 하나만 맞아도 차단이 풀려, 강등이 게이트의 구멍이 된다.
 
+> **키 누락도 OR과 같은 구멍이었다 — `demote` 하위 키는 스키마 required로 명시를 강제한다.**
+> 누락 시 코드가 조건을 조용히 완화하는 방향이라 AND가 사실상 깨졌다. `maxEpss`와
+> `neverDemoteAtOrAboveCvss`는 `is not None` 가드에 걸려 **해당 조건이 통째로 스킵**되고,
+> `enabled`는 `demote.get("enabled", True)`라 **키가 없으면 강등이 켜진다.** base policy가
+> `enabled`를 명시하지 않고 이 코드 기본값 `True`에 기대고 있었다.
+> 스키마 `required`는 **프로파일 병합 '후'** 값을 보므로, base가 키를 빠뜨리면 프로파일이
+> 덮지 않는 한 검증이 잡지 못한다 — 실제로 `strict`만 `enabled: false`로 덮어 통과했고
+> `balanced`/`monitor`는 키가 없는 채로 지나갔다. 그래서 base에 `enabled: true`를 명시하고
+> `required: ["enabled", "maxEpss", "neverDemoteAtOrAboveCvss"]`를 넣었다. 이제 demote
+> 하위 키는 전부 명시가 강제되고, 빠지면 fail-closed로 막힌다(E-21).
+
 ### D-16. demoteOnlyWhenNoFix — 고칠 수 있으면 차단 유지
 ① fix 버전이 있는 취약점은 강등하지 않고 차단을 유지한다.
 ② 고칠 수 있는 건 **값싼 업그레이드로 해결**되므로 차단을 유지해 강제하는 게 낫다.
@@ -282,6 +299,16 @@ false)로 전환.
 복사·수정하지 않고 **이름 하나**로 강도를 고르게 해, 공통부(severityMapping 등)는
 base 단일 출처로 유지한다.
 
+> **판정 baseline 재현 — block 4 / warn 11 / pass 13**
+> `CVE_INCLUDE_TEST_FIXTURES=1 python3 scripts/cve-policy-evaluate.py`
+> (입력: `security/sbom/generated/cve-risk-assessment.json`)
+> 이 환경변수 **없이** 실행하면 **총 27건 / 차단 3 / 경고 11 / 통과 13**이 나온다.
+> block 4 중 1건은 KEV 픽스처(CVE-2021-44228, Log4Shell) 주입분이기 때문이다 —
+> mock SBOM의 CVE는 전부 KEV 미등재·EPSS 낮음이라 KEV 승격(D-17) 발동을 볼 수 없어
+> 픽스처로 주입한다. 따라서 실전 전환 시 픽스처를 제거하면 baseline은 **3 / 11 / 13**
+> 으로 바뀌며, **이는 회귀가 아니라 픽스처가 빠진 정상 결과다.** 차단이 하나 줄었다고
+> 판정 로직 변경을 의심하지 말 것.
+
 ### G-29. strict는 annotateOnly가 아니라 demote.enabled=false로 강등을 끔
 ① `strict.json`은 `annotateOnly: false`로 두되 `demote.enabled: false`로 강등만 끈다.
 ② `annotateOnly: true`로 끄면 **승격(promote)까지 표시만** 되어버린다. strict가 원하는
@@ -357,6 +384,33 @@ findings가 이미 있으면 early return하므로 **normalize-trivy.py가 영�
 금지는 아니지만 선결 조건이 있다 — (a) 통합 노멀라이저가 `purl`·`fixedVersion`을
 채우고, (b) raw를 파괴하지 않거나 `maybe_inject_trivy()`의 early return을 함께
 고쳐야 한다. 둘 중 하나라도 빠지면 통합하지 말 것.
+
+**재발 방지 장치와 그 한계.** `normalize-reports.py`에서 `normalize_trivy()` 함수와
+`NORMALIZERS`의 `"trivy"` 항목을 **제거해 뒀다.** `TARGETS`에 줄만 되돌리면
+`NORMALIZERS[tool]`이 `KeyError`를 내므로, purl·fixedVersion 없는 findings가 조용히
+나가는 일은 없다. 다만 이 `KeyError`가 **잡을 죽이지는 않는다** — `normalize_file()`
+의 파일 단위 예외 격리에 걸려 아래처럼 흘러간다.
+
+```
+TARGETS 에 dependency-report.json 재추가
+  → NORMALIZERS["trivy"] KeyError
+  → 파일 단위 except 가 포착 (잡은 계속 진행, exit 0)
+  → dependency-report.json 이 {"status":"error","tool":"trivy","findings":[]} 로 덮임
+  → maybe_inject_trivy() 가 SchemaVersion 을 못 찾아 baseline 주입 포기
+  → 의존성 findings 전량 소실 (purl 소실보다 넓은 피해)
+```
+
+**이 케이스를 실제로 잡아내는 것은 리포트 `status` 기반 건전성 판정이다.** 위
+흐름의 최종 산출물은 `status: "error"`이고, 건전성 판정이 `not_found`/`error`/
+`malformed` 리포트를 수집해 프로파일별로(strict=block / balanced=warn /
+monitor=기록) 처리하면 재발이 PR 댓글까지 표면화된다. 그 판정이 없으면 이 방어는
+CI 로그 한 줄로만 남는다 — **이 항목은 그 설계 시 반드시 함께 참조할 것.**
+
+대안 둘은 검토 후 기각했다. ⑴ `TARGETS`↔`NORMALIZERS` 정합성을 시작 시 검사해
+exit 1 — 잡이 죽으면 aggregate·evaluate가 실행되지 않아 `gate-decision.json`이 아예
+없는 상태로 돌아간다(리포팅 레벨 fail-blind). ⑵ 미지원 도구를 쓰기 없이 건너뛰기 —
+raw는 보존되지만 `status: "error"` 흔적조차 남지 않아 건전성 판정이 잡을 근거를
+잃는다. **덮어쓰기를 감수하고 흔적을 남기는 편**이 두 대안보다 낫다는 판단이다.
 
 ---
 
