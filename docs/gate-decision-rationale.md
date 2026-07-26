@@ -330,6 +330,34 @@ EPSS는 보조 예측치라 없어도 CVSS로 판정된다. E-20과 같은 "판�
 > 근거 미기록: **정확히 120초인 이유**는 리포에 없다. timeout이 failOpen인 근거는
 > E-20에 있으나 값 자체의 캘리브레이션 기록은 없음.
 
+### H-30f. 리포트 정규화가 Semgrep·Gitleaks(디스크)와 Trivy(in-process)로 갈린다
+① 네이티브 JSON → 공통 스키마 변환이 두 경로로 나뉜다.
+
+| 도구 | 변환 주체 | 방식 |
+| --- | --- | --- |
+| Semgrep, Gitleaks | `normalize-reports.py` (워크플로 `Run Normalizer` 스텝) | 디스크 파일을 **제자리 덮어쓰기** |
+| Trivy | `evaluate-gate.py` → `normalize-trivy.py` | **in-process**, 메모리에서만 변환(원본 보존) |
+
+`normalize-reports.py`의 `TARGETS`에 `dependency-report.json`이 **없는 것은 의도된
+것**이다. 대칭이 안 맞아 보인다고 도로 넣으면 안 된다.
+
+② 두 노멀라이저의 출력이 다르기 때문이다. `normalize-trivy.py`만 optional 필드
+`purl`·`fixedVersion`을 채우고, 이 둘은 CVE 보정 레이어가 (purl, CVE) evidence
+매칭(D-19)과 fix 여부 판단(D-16)에 쓴다. `normalize-reports.py`가 Trivy를 제자리
+덮어쓰면 raw Trivy JSON이 사라져 두 필드가 소실되는데, `maybe_inject_trivy()`는
+findings가 이미 있으면 early return하므로 **normalize-trivy.py가 영영 호출되지
+않는다.** 그러면 `demoteOnlyWhenNoFix`(D-16) 검사가 `fixedVersion`을 못 찾아
+**fix가 있는 취약점을 "fix 없음"으로 오인해 강등**한다. 강등은 차단을 푸는 유일한
+경로라(D-15) 방향이 최악이다. Semgrep·Gitleaks에는 이런 optional 필드가 없어
+디스크 변환으로 충분하다 — 비대칭의 근거는 **보정 레이어가 쓰는 필드의 유무**이지
+도구 종류가 아니다.
+
+③ 다르게 하면(둘을 한 스크립트로 통합): 위 소실이 조용히 재발한다. 게이트는
+그대로 초록으로 통과하고, 강등된 항목만 경고로 새어나가 눈에 안 띈다. 통합 자체가
+금지는 아니지만 선결 조건이 있다 — (a) 통합 노멀라이저가 `purl`·`fixedVersion`을
+채우고, (b) raw를 파괴하지 않거나 `maybe_inject_trivy()`의 early return을 함께
+고쳐야 한다. 둘 중 하나라도 빠지면 통합하지 말 것.
+
 ---
 
 ## 불일치 발견

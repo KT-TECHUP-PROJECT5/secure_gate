@@ -9,7 +9,12 @@ aggregate/evaluate가 손대지 않고도 동작하게 만드는 어댑터다.
 변환 대상 (security/reports/ 안의 파일):
   - sast-report.json        : Semgrep  {version, results, errors, ...}
   - secret-report.json      : Gitleaks [ {...}, ... ]  (배열)
-  - dependency-report.json  : Trivy    {SchemaVersion, Results, ...}
+
+Trivy(dependency-report.json)는 대상이 아니다. evaluate-gate.py 가
+normalize-trivy.py 를 in-process 로 호출해 메모리에서만 변환한다. 여기서
+제자리 덮어쓰기를 하면 raw Trivy JSON 이 사라져 purl·fixedVersion 이 소실되고,
+CVE 보정 레이어의 강등 가드(D-16)가 무력화된다. TARGETS 에 다시 넣지 말 것.
+(근거: docs/gate-decision-rationale.md H-30f)
 
 이미 공통 스키마({"tool","findings"})인 파일(build/runtime placeholder 등)은
 그대로 통과시킨다. 파일이 없으면 건너뛴다.
@@ -37,7 +42,6 @@ REPORTS_DIR = Path("security/reports")
 TARGETS = {
     "sast-report.json":       "semgrep",
     "secret-report.json":     "gitleaks",
-    "dependency-report.json": "trivy",
 }
 
 
