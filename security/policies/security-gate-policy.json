@@ -1,6 +1,10 @@
 {
-  "blockOnCritical": true,
-  "blockOnHigh": true,
   "blockOnSecret": true,
-  "warnOnMedium": true
+  "blockOnScannerError": true,
+  "blockOnAvailability": true,
+  "blockOnAvailabilityMedium": false,
+  "blockOnVulnCritical": true,
+  "blockOnVulnHigh": true,
+  "warnOnMedium": true,
+  "warnOnMisconfig": true
 }

@@ -8,7 +8,8 @@ Version: 1.0
 # PR Comment Template
 
 아래 형식은 `create-pr-comment.py`가 생성하는 PR 댓글의 기준 구조입니다.
-E 파트의 수정 가이드 템플릿이 확정되면 이 파일을 업데이트하고 스크립트와 연결합니다.
+자동 수정 가이드 생성은 계획에서 제외했으며, AI 결과 보고서는 별도 담당이 구성한다.
+Gate 판단 기준은 `docs/aggregator-policy-baseline.md`를 따른다.
 
 ---
 
@@ -36,10 +37,10 @@ E 파트의 수정 가이드 템플릿이 확정되면 이 파일을 업데이�
 
 - [Medium 등급 경고가 있는 경우 기재]
 
-### 수정 가이드
+### 다음 행동
 
-<!-- E 파트의 수정 가이드 템플릿과 연결 예정 -->
-- 수정 후 다시 push하면 Security Gate가 재실행됩니다.
+- 상세 결과는 Artifact의 `gate-decision.json` / `security-summary.json`을 확인한다.
+- 수정 후 다시 push하면 Security Gate가 재실행된다.
 
 ---
 *Secure PR Gate by A-Part Pipeline*

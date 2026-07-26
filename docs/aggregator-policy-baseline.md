@@ -1,24 +1,31 @@
 ---
 문서명: Aggregator 및 Gate Policy 기준선
-최신화: 2026-07-24
-상태: Baseline v0.1 / 팀 합의 전 임시 기준
+최신화: 2026-07-26
+상태: Baseline v0.2 / 팀 진행 기준 (category 기반 코드 반영)
 ---
 
 # Aggregator 및 Gate Policy 기준선
 
-## 1. 문서 목적
+## 1. 한 줄 원칙
 
-이 문서는 현재 Secure Gate 코드가 검사 결과를 어떻게 통합하고,
-어떤 조건으로 Block/Pass를 결정하는지 설명한다.
+**검사는 단계마다 더 깊게 하고, 차단은 “서비스 장애·큰 보안 이슈”만 한다.**
 
-현재 기준은 최종 팀 정책이 아니다.
-기존 `security-gate-policy.json`, `evaluate-gate.py`와 프로젝트 문서를 바탕으로
-False Pass를 방지하기 위해 적용한 보수적인 초기 기준이다.
+PR / Post-merge의 차이는 “무엇을 더 찾아보느냐”이지, “언제 막느냐”가 아니다.
 
-팀은 이 문서를 출발점으로 심각도 매핑, 허용 임계값, 예외 승인,
-PR/Post-merge 정책 차이를 단계적으로 확정한다.
+팀 설명용 문장:
 
-## 2. 책임 분리
+> Secure Gate는 ESLint처럼 동작한다.
+> PR에서는 빠르게, merge 후에는 더 깊게 검사하지만 막는 기준은 같다.
+> 서비스 장애나 큰 보안 이슈만 Block하고, 그 외는 Warn으로 남기며,
+> 확인된 오탐과 예외는 만료일 있는 승인으로 관리한다.
+
+## 2. 역할 분리
+
+| 구분 | 의미 |
+| --- | --- |
+| 검사 강도 | PR = 빠른 soft scan / Post-merge = 깊은 hard scan |
+| 차단 기준 | 둘 다 동일 |
+| 결과 활용 | soft에서 본 이슈 + hard에서 추가된 이슈를 같은 기준으로 판단 |
 
 ### Aggregator
 
@@ -33,17 +40,88 @@ PR/Post-merge 정책 차이를 단계적으로 확정한다.
 
 `scripts/evaluate-gate.py`가 담당한다.
 
-- Aggregator가 만든 요약 결과를 정책과 비교
-- Block 사유와 Warning 생성
+- Aggregator 요약을 정책과 비교
+- Block / Warn / Pass 결정
 - `security/reports/gate-decision.json` 생성
 - Block이면 종료 코드 `1` 반환
 
-Aggregator는 원본 결과를 통합하고, 최종 Block/Pass는 Policy Evaluator가 결정한다.
-단, 도구별 심각도를 공통 심각도로 변환하는 현재 로직에는 일부 정책적 가정이 포함되어 있다.
+Aggregator는 결과를 모으고, 최종 Block/Pass는 Policy Evaluator가 결정한다.
 
-## 3. 입력 보고서
+## 3. Block / Warn / Pass
 
-PR Gate는 다음 보고서를 필수 입력으로 사용한다.
+### Block (막음)
+
+서비스 장애나 명확한 대형 보안 이슈만 막는다.
+
+- Secret 노출
+- Critical / High 중 실제로 위험한 것  
+  예: RCE, 인증 우회, XSS/SQLi 실탐지, 심각한 의존성 CVE
+- Health / Smoke 실패처럼 서비스가 안 뜨는 상태
+- 스캐너가 아예 실패해서 결과를 신뢰할 수 없는 경우 (Fail Closed 최소선)
+
+### Warn (알림만)
+
+고치는 게 맞지만 당장 배포를 막을 정도는 아닌 것.
+
+- Medium
+- 보안 헤더 누락
+- HTTP Only / 캐시 이슈
+- 오탐 가능성이 큰 Low~Medium SAST
+
+### Pass
+
+- Low
+- Informational
+- 예외 승인된 항목 (사유, 승인자, 만료일 기록)
+
+### 중요: 방어 태세와 실제 취약점을 섞지 않는다
+
+| 유형 | 예시 | 권장 |
+| --- | --- | --- |
+| 실제 취약점 | XSS, SQLi, RCE, Auth bypass | Block |
+| 보호 설정 미흡 | CSP 없음, X-Frame-Options 없음, HTTP Only | Warn |
+| 환경/캐시 | Cacheable Content | Warn |
+
+헤더 누락을 Warn으로 둔다고 해서 XSS/SQLi가 Warn으로 내려가면 안 된다.
+둘은 다른 finding이며, 실제 취약점 finding은 별도로 Block한다.
+
+## 4. PR (soft) vs Post-merge (hard)
+
+### PR soft
+
+- 빠르게 큰 구멍만 본다
+- 같은 Block 기준으로 merge를 막거나 허용
+
+### Post-merge hard
+
+- ZAP Full, Nuclei 확대, Dynatrace 등 더 깊게 본다
+- 새로 나온 결과도 같은 Block 기준으로 다음 단계 승격을 막거나 허용
+
+적용 규칙:
+
+- soft에서 이미 Critical급 Block 이슈면 PR에서 막힘
+- hard에서 추가로 Block 이슈가 나오면 그때 막힘
+- soft에서 Warn이었던 것이 hard에서도 Warn이면 계속 Warn
+- hard라고 해서 Medium까지 갑자기 Block으로 올리지 않음
+
+## 5. 오탐 / 예외 고도화
+
+엄격함을 줄이려면 Block 목록만 줄이지 말고, 예외를 명시적으로 관리한다.
+
+1. 기본은 Fail Closed  
+   결과 없음 / 도구 고장 → 막음
+2. 다만 아래는 예외 가능  
+   - 확인된 오탐  
+   - Accepted Risk (기한 있음)  
+   - 아직 수정 중인 알려진 이슈
+3. 예외는 “무시”가 아니라 아래를 남긴다  
+   - 왜 예외인지  
+   - 누가 승인했는지  
+   - 언제 만료되는지
+
+## 6. 입력 보고서
+
+### PR Gate
 
 - `build-report.json`
 - `sast-report.json`
@@ -51,13 +129,13 @@ PR Gate는 다음 보고서를 필수 입력으로 사용한다.
 - `dependency-report.json`
 - `runtime-report.json`
 
-Post-merge Gate는 다음 보고서를 Aggregator의 직접 입력으로 사용한다.
+### Post-merge Gate
 
 - `dependency-report.json`
 - `dependency-track-upload-report.json`
 - `runtime-report.json`
 
-Post-merge의 `runtime-report.json`은 내부적으로 다음 원본 보고서의 존재와 결과를 검증한다.
+Post-merge `runtime-report.json`은 내부적으로 다음 원본을 검증한다.
 
 - `zap-report.json`
 - `nuclei-report.jsonl`
@@ -65,12 +143,9 @@ Post-merge의 `runtime-report.json`은 내부적으로 다음 원본 보고서�
 - `dynatrace-problems.json`
 
 PR에서는 SBOM을 Artifact로만 보존하고 Dependency-Track 업로드를 수행하지 않는다.
-Post-merge에서는 CycloneDX SBOM을 Dependency-Track에 업로드하며, 업로드 실패나
-skip을 기술 실패로 처리한다.
+Post-merge에서는 CycloneDX SBOM 업로드 성공을 필수로 본다.
 
-## 4. 공통 finding 형식
-
-도구별 결과는 다음 필드로 정규화한다.
+## 7. 공통 finding 형식
 
 ```json
 {
@@ -82,258 +157,141 @@ skip을 기술 실패로 처리한다.
 }
 ```
 
-보고서 공통 형식은 다음과 같다.
+향후 고도화 시 아래 필드를 추가할 수 있다.
+
+- `category`: `vuln` | `misconfig` | `secret` | `availability` | `scanner-error`
+- `remediation`: 권고 문구 (자동 수정 가이드 생성은 별도 AI 담당, 본 기준선 범위 밖)
+
+## 8. 현재 코드 반영 상태
+
+`scripts/gate_policy.py`가 finding `category`를 분류하고,
+`evaluate-gate.py`가 아래 정책 파일로 Block/Warn을 판단한다.
 
 ```json
 {
-  "status": "passed | warning | failed | error | not_found",
-  "tool": "tool name",
-  "findings": [],
-  "errors": []
-}
-```
-
-`status`는 보고서 표시와 오류 판별에 사용한다.
-취약점 차단 여부는 최종적으로 정규화된 finding의 심각도 플래그로 결정한다.
-
-## 5. 도구별 정규화 기준
-
-### Semgrep
-
-현재 임시 매핑:
-
-- `ERROR` → `high`
-- `WARNING` → `medium`
-- `INFO` → `low`
-- `errors[]`가 한 건 이상 존재 → 기술 오류로 기록
-
-주의: Semgrep의 `ERROR`는 CVSS High와 완전히 동일한 개념이 아니다.
-이 매핑은 팀 합의가 필요한 가장 중요한 임시 기준 중 하나다.
-
-### Gitleaks
-
-- 탐지 결과 한 건 → `secret`
-- 탐지 결과가 없으면 `passed`
-- Secret 원문은 Summary와 Artifact에 복사하지 않음
-
-### Trivy
-
-Trivy의 원본 `Severity`를 소문자로 변환하여 그대로 사용한다.
-
-- `CRITICAL` → `critical`
-- `HIGH` → `high`
-- `MEDIUM` → `medium`
-- `LOW` → `low`
-
-Gate 입력은 `dependency-report.json`의 `Results[].Vulnerabilities[]`다.
-CycloneDX SBOM의 `vulnerabilities[]`는 Gate 근거로 사용하지 않는다.
-
-### Runtime Validation
-
-`runtime-validation.py`가 ZAP, Nuclei, Dynatrace 및 직접 Runtime 검사를
-공통 finding으로 변환한 뒤 Aggregator에 전달한다.
-
-현재 주요 매핑:
-
-- ZAP risk code `4` → `critical`
-- ZAP risk code `3` → `high`
-- ZAP risk code `2` → `medium`
-- 그 외 ZAP risk code → `low`
-- Nuclei `critical/high/medium/low` → 동일 심각도
-- Dynatrace Availability/Error/Monitoring unavailable → `high`
-- Dynatrace Performance/Resource contention/Custom alert → `medium`
-- Dynatrace의 그 외 문제 → `low`
-- Health/Smoke 실패 및 필수 보고서 누락 → `high`
-
-범용 Post-merge Reusable Workflow에서는 애플리케이션별 인증정보 오용을 막기 위해
-Custom Runtime Check 기본값을 `none`으로 둔다.
-
-### Build/Test
-
-현재 `build-report.json`은 공통 보고서 형식을 사용한다.
-다만 실제 Build/Test Job은 아직 Placeholder이므로 품질 Gate 근거로 확정할 수 없다.
-
-## 6. 현재 Block/Pass 기준
-
-현재 `security-gate-policy.json`의 기준:
-
-```json
-{
-  "blockOnCritical": true,
-  "blockOnHigh": true,
   "blockOnSecret": true,
-  "warnOnMedium": true
+  "blockOnScannerError": true,
+  "blockOnAvailability": true,
+  "blockOnAvailabilityMedium": false,
+  "blockOnVulnCritical": true,
+  "blockOnVulnHigh": true,
+  "warnOnMedium": true,
+  "warnOnMisconfig": true
 }
 ```
 
-Policy Evaluator의 실제 판단:
+| 항목 | 현재 코드 | 상태 |
+| --- | --- | --- |
+| finding category | `vuln` / `misconfig` / `secret` / `availability` / `scanner-error` | 반영 |
+| Critical/High vuln | Block | 반영 |
+| misconfig (헤더/HTTP Only/캐시) | Warn | 반영 |
+| Secret / 가용성 / 스캐너 오류 | Block | 반영 |
+| PR vs Post-merge 차단 기준 | 동일 | 유지 |
+| 예외 승인 | `security/policies/suppressions.json` | 기본 골격 반영 |
+| ZAP XSS 탐지 고도화 | 별도 DAST 과제 | 보류 |
 
-- Critical finding이 한 건 이상이면 Block
-- High finding이 한 건 이상이면 Block
-- Secret finding이 한 건 이상이면 Block
-- Medium finding만 있으면 Pass와 Warning
-- Low finding만 있으면 Pass하고 결과만 기록
-- finding이 없으면 Pass
-- 필수 보고서 누락, JSON 오류, 지원하지 않는 형식 또는 선행 Job 실패가 있으면 Block
+예외 파일 예시:
 
-현재는 finding 건수 임계값이 없다.
-따라서 Block 대상 심각도가 한 건만 있어도 차단한다.
+```json
+{
+  "suppressions": [
+    {
+      "id": "CVE-2020-1747",
+      "location_contains": "requirements-legacy.txt:PyYAML",
+      "reason": "accepted lab fixture",
+      "approved_by": "policy-owner",
+      "expires_on": "2026-12-31"
+    }
+  ]
+}
+```
 
-## 7. 기술 실패 정책
+## 9. 기술 실패 정책
 
-현재 기준은 Fail Closed다.
+Fail Closed 최소선은 유지한다.
 
-다음 상황을 취약점 없음으로 처리하지 않는다.
-
-- 필수 Artifact가 생성되지 않음
-- 보고서 JSON을 파싱할 수 없음
+- 필수 Artifact 미생성
+- JSON 파싱 실패
 - 지원하지 않는 보고서 형식
-- Semgrep/Gitleaks/Trivy/Runtime Job 실패 또는 취소
-- ZAP/Nuclei 실행 오류나 timeout
+- Semgrep / Gitleaks / Trivy / Runtime Job 실패 또는 취소
+- ZAP / Nuclei 실행 오류나 timeout
 - Post-merge 필수 원본 보고서 누락
+- Post-merge Dependency-Track 업로드 실패 또는 skip
 
-이 경우 Summary의 `has_error`가 `true`가 되고 Gate는 Block된다.
+이 경우는 취약점 없음으로 처리하지 않고 Block한다.
 
-PR에서는 Dependency-Track 업로드를 수행하지 않으므로 업로드 결과를 Gate에 포함하지 않는다.
-Post-merge에서는 SBOM 추적이 하드 프로필의 필수 단계이므로 Dependency-Track 업로드
-실패 또는 skip을 기술 실패로 처리하여 Gate를 차단한다.
+## 10. 판단 예시
 
-## 8. PR과 Post-merge 차이
+### 예시 A: 실제 XSS / SQLi 탐지
 
-### PR
+- Gate: `FAILED`
+- 이유: 실제 취약점 (Block)
 
-- 전체 정적·의존성·Runtime 결과를 통합
-- ZAP Baseline과 제한된 Nuclei 프로필 사용
-- `enable_dast=false`이면 동적 스캐너는 실행하지 않음
-- Critical/High/Secret 또는 기술 실패 시 Merge 차단
+### 예시 B: 보안 헤더 누락, HTTP Only
 
-### Post-merge
+- Gate: `PASSED` + Warning
+- 이유: 보호 설정 미흡 (Warn)
+- 같은 실행에서 XSS가 따로 탐지되면 그 finding은 Block
 
-- 배포된 Staging URL을 대상으로 실행
-- ZAP Full Scan과 확대된 Nuclei 프로필 사용
-- Dynatrace Problems 및 해당 애플리케이션 Service entity 확인
-- ZAP/Nuclei/Coverage/Dynatrace 보고서를 모두 필수로 요구
-- Trivy CVE 보고서와 CycloneDX SBOM 생성
-- Dependency-Track SBOM 업로드 성공을 필수로 요구
-- Dependency/Dependency-Track/Runtime 보고서를 집계하여 다음 환경 승격 여부 판단
+### 예시 C: Secret 1건
 
-현재 PR과 Post-merge의 심각도 차단 기준은 동일하다.
-검사 강도와 필수 보고서 범위만 다르다.
+- Gate: `FAILED`
+- Secret 원문은 출력하지 않음
 
-## 9. 판단 예시
+### 예시 D: Critical CVE이지만 Accepted Risk (만료 전)
 
-### 예시 A: Trivy High 1건
+- Gate: `PASSED` + Warning 또는 예외 기록
+- 만료 후에는 다시 Block
 
-- `has_high=true`
-- Gate 결과: `FAILED`
-- 이유: High finding 탐지
+### 예시 E: 스캐너 보고서 누락
 
-### 예시 B: Semgrep Warning 2건
+- Gate: `FAILED`
+- 이유: 기술 실패 (Fail Closed)
 
-- 두 finding을 Medium으로 변환
-- `has_medium=true`
-- Gate 결과: `PASSED`
-- Warning 메시지 포함
+## 11. 계획에서 제외 / 보류
 
-### 예시 C: Gitleaks 1건
+- E 파트 자동 수정 가이드 생성: 계획에서 제외  
+  다른 담당자가 AI 결과 보고서를 별도로 구성한다.
+- ZAP 탐지 고도화(예: Reflected/Stored XSS 커버리지): DAST 고도화 항목으로 별도 진행
+- Discord / Telegram 요약 알림: 정책 확정 후 Gate 요약 연동으로 진행 가능
 
-- `has_secret=true`
-- Gate 결과: `FAILED`
-- Secret 값은 출력하지 않음
+## 12. 고도화 순서
 
-### 예시 D: 모든 finding이 Low
+### 1단계: 기준 고정 (현재)
 
-- Gate 결과: `PASSED`
-- Summary에는 finding을 유지
+- 본 문서의 한 줄 원칙과 Block/Warn/Pass 구분 확정
+- PR/Post-merge 차단 기준 동일 원칙 확정
 
-### 예시 E: SAST Artifact 누락
+### 2단계: finding 분류
 
-- SAST 보고서 상태: `not_found` 또는 `error`
-- `has_error=true`
-- Gate 결과: `FAILED`
-
-## 10. 현재 기준의 알려진 한계
-
-- Semgrep 심각도와 CVSS 심각도를 동일하게 볼 수 없음
-- 도구별 신뢰도와 오탐 가능성을 정책에 반영하지 않음
-- finding 건수 또는 누적 위험 점수 기준이 없음
-- 같은 취약점의 중복 탐지를 제거하지 않음
-- Accepted Risk, Suppression, 만료일이 있는 예외 승인이 없음
-- 파일·서비스·환경별 정책 차이가 없음
-- 신규 또는 알 수 없는 심각도의 명시적인 처리 기준이 없음
-- Build/Test가 실제 구현이 아닌 Placeholder
-- 실제 GitHub Actions E2E 결과로 기준을 보정하지 않음
-
-## 11. 팀 합의가 필요한 항목
-
-우선순위 1:
-
-- Semgrep `ERROR/WARNING/INFO`를 어떤 공통 심각도로 볼 것인지
-- 스캐너 기술 실패 시 항상 차단할 것인지
-- PR과 Post-merge에 같은 차단 기준을 적용할 것인지
-- Critical/High 한 건 차단 정책을 유지할 것인지
-
-우선순위 2:
-
-- Medium finding 허용 개수
-- 도구별 차단 예외
-- 오탐 승인 주체와 증빙 방식
-- 예외 만료일과 재검토 주기
-- Dynatrace 문제의 서비스·환경 범위
-
-우선순위 3:
-
-- 중복 finding 식별 기준
-- 누적 위험 점수 모델
-- 추세 악화 기준
-- Dependency-Track 결과를 Gate에 포함할 시점
-
-## 12. 권장 고도화 순서
-
-### 1단계: 기준 승인
-
-- 본 문서의 임시 매핑을 팀 리뷰
-- PR/Post-merge 차단 기준 확정
-- 기술 실패 정책 확정
-
-### 2단계: 정책 파일 확장
-
-현재 Boolean 정책을 다음 개념까지 표현하도록 확장한다.
-
-- 도구별 최소 차단 심각도
-- 심각도별 허용 건수
-- PR/Post-merge 프로필별 정책
-- 알 수 없는 심각도 처리
+- `vuln` / `misconfig` / `secret` / `availability` / `scanner-error` 분류 도입
+- Critical/High를 무조건 Block하지 않고 분류 기준으로 거름
 
 ### 3단계: 예외 관리
 
-- finding ID와 위치 기반 Suppression
-- 승인자와 사유 기록
-- 만료일 필수
-- 만료된 예외 자동 차단
+- finding ID + 위치 기반 Suppression
+- 승인자, 사유, 만료일 필수
+- 만료된 예외 자동 Block
 
-### 4단계: 품질 강화
+### 4단계: 운영 알림
 
-- 공통 보고서 JSON Schema 검증
+- `gate-decision.json` 요약본을 Discord / Telegram으로 전송
+- Secret 원문과 과도한 finding dump는 알림에 포함하지 않음
+
+### 5단계: 품질 강화
+
+- 회귀 테스트 (Pass 1건 + Block 1건 이상)
 - 중복 finding 제거
-- 실제 GitHub Actions E2E fixture 추가
-- Policy 회귀 테스트 추가
-
-### 5단계: 운영 지표
-
-- PR별 finding 증감
-- 신규 취약점과 기존 취약점 구분
-- 스캐너 실패율
-- 예외 건수와 만료 현황
+- 실제 GitHub Actions fixture 보강
 
 ## 13. 변경 원칙
 
-정책 변경 시 다음 내용을 함께 갱신한다.
+정책 변경 시 함께 갱신한다.
 
 - 이 기준선 문서
 - `security/policies/security-gate-policy.json`
-- `scripts/aggregate-results.py`의 도구별 정규화
-- `scripts/evaluate-gate.py`의 판단 로직
-- `tests/test_aggregate_results.py`의 회귀 테스트
+- `scripts/aggregate-results.py`
+- `scripts/evaluate-gate.py`
+- 관련 회귀 테스트
 
 정책 변경은 최소 한 개의 Pass 사례와 한 개의 Block 사례를 테스트로 추가한 뒤 반영한다.

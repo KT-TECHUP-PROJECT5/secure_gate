@@ -83,8 +83,8 @@ def build_comment(decision: dict | None) -> str:
         warning_section = f"\n### 경고\n\n{items}\n"
 
     guide_section = (
-        "\n### 수정 가이드\n\n"
-        "<!-- E 파트의 수정 가이드 템플릿과 연결 예정 -->\n"
+        "\n### 다음 행동\n\n"
+        "- 상세 결과는 Artifact의 `gate-decision.json` / `security-summary.json`을 확인하세요.\n"
         "- 수정 후 다시 push하면 Security Gate가 재실행됩니다.\n"
         if block_reasons else ""
     )

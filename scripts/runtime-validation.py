@@ -15,11 +15,18 @@ import html
 import json
 import os
 import re
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+import gate_policy
 
 OUTPUT_PATH = Path("security/reports/runtime-report.json")
 DEFAULT_ZAP_REPORT_PATH = Path("security/reports/zap-report.json")
@@ -44,14 +51,17 @@ DISABLED_VALUES = {"none", "off", "false", "disable", "disabled"}
 SUPPORTED_REQUIRED_REPORTS = {"zap", "nuclei", "nuclei-coverage", "dynatrace"}
 
 
-def make_finding(finding_id, severity, title, description, location):
-    return {
+def make_finding(finding_id, severity, title, description, location, category=None):
+    finding = {
         "id": finding_id,
         "severity": severity,
         "title": title,
         "description": description,
         "location": location,
     }
+    if category:
+        finding["category"] = category
+    return gate_policy.with_category(finding)
 
 
 def env_or_default(name, default):
@@ -207,6 +217,7 @@ def check_health(base_url, health_path, expected_statuses, timeout):
                 "Health check request failed",
                 f"Could not reach health endpoint: {error}",
                 health_url,
+                category="availability",
             )
         ]
 
@@ -218,6 +229,7 @@ def check_health(base_url, health_path, expected_statuses, timeout):
                 "Health check returned unexpected status",
                 f"Expected [{format_statuses(expected_statuses)}], got HTTP {status_code}.",
                 health_url,
+                category="availability",
             )
         ]
 
@@ -240,6 +252,7 @@ def check_smoke(base_url, smoke_tests, timeout):
                     "Smoke test request failed",
                     f"Could not reach smoke test endpoint: {error}",
                     smoke_url,
+                    category="availability",
                 )
             )
             continue
@@ -252,6 +265,7 @@ def check_smoke(base_url, smoke_tests, timeout):
                     "Smoke test returned unexpected status",
                     f"Expected [{format_statuses(expected_statuses)}], got HTTP {status_code}.",
                     smoke_url,
+                    category="availability",
                 )
             )
 
@@ -294,6 +308,7 @@ def check_headers(base_url, required_headers, timeout):
                     f"Missing security header: {header}",
                     "Required security header was not present in the response.",
                     base_url,
+                    category="misconfig",
                 )
             )
 
@@ -946,6 +961,7 @@ def check_required_reports(args):
                     "but the expected report file was not created."
                 ),
                 str(report_path),
+                category="scanner-error",
             )
         )
 
@@ -1111,15 +1127,16 @@ def parse_dynatrace_problems(dynatrace_problems_path):
 
 
 def decide_status(findings):
-    severities = [finding["severity"] for finding in findings]
-
-    if "critical" in severities or "high" in severities or "secret" in severities:
-        return "failed"
-
-    if findings:
-        return "warning"
-
-    return "passed"
+    policy = {
+        "blockOnSecret": True,
+        "blockOnScannerError": True,
+        "blockOnAvailability": True,
+        "blockOnVulnCritical": True,
+        "blockOnVulnHigh": True,
+        "warnOnMedium": True,
+        "warnOnMisconfig": True,
+    }
+    return gate_policy.finding_report_status(findings, policy)
 
 
 def make_config_finding(setting_name, message):
@@ -1129,6 +1146,7 @@ def make_config_finding(setting_name, message):
         f"Invalid Runtime Validation setting: {setting_name}",
         message,
         setting_name,
+        category="scanner-error",
     )
 
 

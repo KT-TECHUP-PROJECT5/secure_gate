@@ -7,6 +7,9 @@ security/reports/*.jsonl
 security/reports/*.sarif
 security/reports/*.txt
 
+# 로컬에서 내려받은 Actions Artifact 샘플
+testsFiles/
+
 # Python
 __pycache__/
 *.pyc
