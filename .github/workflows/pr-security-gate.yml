@@ -566,7 +566,7 @@ jobs:
       - name: Download all scan reports
         uses: actions/download-artifact@v4
         with:
-          path: .
+          path: security/reports
           merge-multiple: true
 
       - name: Resolve policy file
