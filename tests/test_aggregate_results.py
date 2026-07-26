@@ -68,6 +68,7 @@ class ScannerNormalizationTests(unittest.TestCase):
 
         self.assertEqual("error", report["status"])
         self.assertEqual("high", report["findings"][0]["severity"])
+        self.assertEqual("vuln", report["findings"][0]["category"])
         self.assertEqual("app.py:12", report["findings"][0]["location"])
         self.assertTrue(report["errors"])
 
@@ -105,6 +106,7 @@ class ScannerNormalizationTests(unittest.TestCase):
 
         self.assertEqual("failed", report["status"])
         self.assertEqual("secret", report["findings"][0]["severity"])
+        self.assertEqual("secret", report["findings"][0]["category"])
         self.assertEqual("settings.py:7", report["findings"][0]["location"])
 
     def test_trivy_vulnerabilities_become_policy_findings(self):
@@ -132,10 +134,31 @@ class ScannerNormalizationTests(unittest.TestCase):
 
         self.assertEqual("failed", report["status"])
         self.assertEqual("critical", report["findings"][0]["severity"])
+        self.assertEqual("vuln", report["findings"][0]["category"])
         self.assertEqual(
             "package-lock.json:example",
             report["findings"][0]["location"],
         )
+
+    def test_runtime_misconfig_findings_become_warning_status(self):
+        report = aggregate_results.normalize_report(
+            "runtime_validation",
+            {
+                "status": "failed",
+                "tool": "runtime-validation",
+                "findings": [
+                    {
+                        "id": "runtime.headers.missing.x-frame-options",
+                        "severity": "medium",
+                        "title": "Missing security header: x-frame-options",
+                        "location": "http://example.test",
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual("warning", report["status"])
+        self.assertEqual("misconfig", report["findings"][0]["category"])
 
     def test_dependency_track_upload_must_succeed(self):
         succeeded = aggregate_results.normalize_report(
@@ -171,10 +194,13 @@ class TechnicalFailurePolicyTests(unittest.TestCase):
                 "reports": {},
             },
             {
-                "blockOnCritical": True,
-                "blockOnHigh": True,
                 "blockOnSecret": True,
+                "blockOnScannerError": True,
+                "blockOnAvailability": True,
+                "blockOnVulnCritical": True,
+                "blockOnVulnHigh": True,
                 "warnOnMedium": True,
+                "warnOnMisconfig": True,
             },
         )
 
@@ -185,25 +211,40 @@ class TechnicalFailurePolicyTests(unittest.TestCase):
 class PolicyProfileTests(unittest.TestCase):
     def setUp(self):
         self.policy = {
-            "version": 1,
+            "version": 2,
             "defaultProfile": "pr",
             "profiles": {
                 "pr": {
-                    "blockOnReportError": True,
-                    "blockSeverities": ["critical", "high", "secret"],
-                    "warnSeverities": ["medium"],
+                    "blockOnSecret": True,
+                    "blockOnScannerError": True,
+                    "blockOnAvailability": True,
+                    "blockOnVulnCritical": True,
+                    "blockOnVulnHigh": True,
+                    "warnOnMedium": True,
+                    "warnOnMisconfig": True,
                     "unknownSeverity": "block",
                 },
                 "training": {
-                    "blockOnReportError": True,
-                    "blockSeverities": ["secret"],
-                    "warnSeverities": ["critical", "high", "medium"],
+                    "blockOnSecret": True,
+                    "blockOnScannerError": True,
+                    "blockOnAvailability": False,
+                    "blockOnVulnCritical": False,
+                    "blockOnVulnHigh": False,
+                    "warnOnVulnCritical": True,
+                    "warnOnVulnHigh": True,
+                    "warnOnAvailability": True,
+                    "warnOnMedium": True,
+                    "warnOnMisconfig": True,
                     "unknownSeverity": "warn",
                 },
                 "post_merge": {
-                    "blockOnReportError": True,
-                    "blockSeverities": ["critical", "high", "secret"],
-                    "warnSeverities": ["medium"],
+                    "blockOnSecret": True,
+                    "blockOnScannerError": True,
+                    "blockOnAvailability": True,
+                    "blockOnVulnCritical": True,
+                    "blockOnVulnHigh": True,
+                    "warnOnMedium": True,
+                    "warnOnMisconfig": True,
                     "unknownSeverity": "block",
                 },
             },
@@ -321,8 +362,8 @@ class PolicyProfileTests(unittest.TestCase):
                     "location": "/test",
                     "reason": "Approved test case",
                     "owner": "security-team",
-                    "approvedBy": "security-lead",
-                    "expiresAt": "2026-08-31",
+                    "approved_by": "security-lead",
+                    "expires_on": "2026-08-31",
                     "profiles": ["pr"],
                 }
             ],
@@ -343,8 +384,8 @@ class PolicyProfileTests(unittest.TestCase):
                     "id": "test.finding",
                     "reason": "Expired approval",
                     "owner": "security-team",
-                    "approvedBy": "security-lead",
-                    "expiresAt": "2026-07-01",
+                    "approved_by": "security-lead",
+                    "expires_on": "2026-07-01",
                 }
             ],
             today=date(2026, 7, 26),
@@ -363,8 +404,8 @@ class PolicyProfileTests(unittest.TestCase):
                     "id": "gitleaks.secret",
                     "reason": "Secret exception must be rejected",
                     "owner": "security-team",
-                    "approvedBy": "security-lead",
-                    "expiresAt": "2026-08-31",
+                    "approved_by": "security-lead",
+                    "expires_on": "2026-08-31",
                 }
             ],
             today=date(2026, 7, 26),

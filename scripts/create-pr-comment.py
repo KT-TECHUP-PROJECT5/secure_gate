@@ -26,6 +26,7 @@ TOOL_LABELS = {
     "sast":               "SAST (Semgrep)",
     "secret_scan":        "Secret Scan (Gitleaks)",
     "dependency_scan":    "Dependency Scan (Trivy)",
+    "dependency_track":   "Dependency-Track",
     "runtime_validation": "Runtime Validation",
 }
 
@@ -139,16 +140,16 @@ def build_comment(
         items = "\n".join(
             (
                 f"- `{entry.get('id', 'unknown')}` "
-                f"(만료: {entry.get('expiresAt', 'unknown')}, "
-                f"승인: {entry.get('approvedBy', 'unknown')})"
+                f"(만료: {entry.get('expires_on', entry.get('expiresAt', 'unknown'))}, "
+                f"승인: {entry.get('approved_by', entry.get('approvedBy', 'unknown'))})"
             )
             for entry in accepted_risks
         )
         exception_section = f"\n### 승인된 예외\n\n{items}\n"
 
     guide_section = (
-        "\n### 수정 가이드\n\n"
-        "<!-- E 파트의 수정 가이드 템플릿과 연결 예정 -->\n"
+        "\n### 다음 행동\n\n"
+        "- 상세 결과는 Artifact의 `gate-decision.json` / `security-summary.json`을 확인하세요.\n"
         "- 수정 후 다시 push하면 Security Gate가 재실행됩니다.\n"
         if block_reasons else ""
     )

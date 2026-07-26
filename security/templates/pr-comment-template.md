@@ -1,14 +1,16 @@
 ---
 문서명: PR 댓글 템플릿
-최신화: 2026-07-26
+최신화: 2026-06-30
 작성자: A파트
-Version: 1.1
+Version: 1.0
 ---
 
 # PR Comment Template
 
 아래 형식은 `create-pr-comment.py`가 생성하는 PR 댓글의 기준 구조입니다.
-E 파트의 수정 가이드 템플릿이 확정되면 이 파일을 업데이트하고 스크립트와 연결합니다.
+AI 결과 보고서는 확정 Gate 판정 뒤에서 설명과 개선 방향만 제공한다.
+자동 코드 수정과 AI 기반 Gate 판정은 수행하지 않는다.
+Gate 판단 기준은 `docs/aggregator-policy-baseline.md`를 따른다.
 
 ---
 
@@ -28,6 +30,7 @@ E 파트의 수정 가이드 템플릿이 확정되면 이 파일을 업데이�
 | SAST               | -       | -          |
 | Secret Scan        | -       | -          |
 | Dependency Scan    | -       | -          |
+| Dependency-Track   | -       | -          |
 | Runtime Validation | -       | -          |
 
 ### 차단 사유
@@ -40,18 +43,16 @@ E 파트의 수정 가이드 템플릿이 확정되면 이 파일을 업데이�
 
 ### 승인된 예외
 
-- [적용된 Accepted Risk의 Finding ID, 만료일, 승인자]
-
-### 수정 가이드
-
-<!-- E 파트의 수정 가이드 템플릿과 연결 예정 -->
-- 수정 후 다시 push하면 Security Gate가 재실행됩니다.
+- [finding ID, 승인자, 만료일을 기재]
 
 ### AI 요약
 
-- [AI 전체 요약과 우선 개선 방향]
+- [확정 Gate 결과를 기반으로 한 설명과 우선 개선 방향]
 
-> AI 내용은 설명용이며, 최종 판정은 Gate Evaluator 결과를 따릅니다.
+### 다음 행동
+
+- 상세 결과는 Artifact의 `gate-decision.json` / `security-summary.json`을 확인한다.
+- 수정 후 다시 push하면 Security Gate가 재실행된다.
 
 ---
 *Secure PR Gate by A-Part Pipeline*

@@ -151,6 +151,7 @@ def safe_finding(report_key, finding):
         "report": str(report_key),
         "id": redact_text(finding.get("id", "unknown"), limit=300),
         "severity": severity,
+        "category": redact_text(finding.get("category", "unknown"), limit=100),
         "title": redact_text(finding.get("title", "Untitled finding"), limit=500),
         "description": redact_text(description),
         "location": sanitize_location(finding.get("location", "unknown")),
@@ -177,6 +178,29 @@ def severity_counts_from(decision, findings):
         severity = finding.get("severity")
         if severity in counts:
             counts[severity] += 1
+    return counts
+
+
+def category_counts_from(decision, findings):
+    counts = {
+        "vuln": 0,
+        "misconfig": 0,
+        "secret": 0,
+        "availability": 0,
+        "scanner-error": 0,
+    }
+    decision_counts = decision.get("category_counts")
+    if isinstance(decision_counts, dict):
+        for category in counts:
+            value = decision_counts.get(category, 0)
+            if isinstance(value, int):
+                counts[category] = value
+        return counts
+
+    for finding in findings:
+        category = finding.get("category")
+        if category in counts:
+            counts[category] += 1
     return counts
 
 
@@ -216,6 +240,7 @@ def build_source_payload(decision, max_findings):
     )
     selected_findings = findings[:max_findings]
     severity_counts = severity_counts_from(decision, findings)
+    category_counts = category_counts_from(decision, findings)
 
     return {
         "gate_status": str(decision.get("gate_status", "UNKNOWN")),
@@ -232,6 +257,7 @@ def build_source_payload(decision, max_findings):
             if isinstance(item, str)
         ],
         "severity_counts": severity_counts,
+        "category_counts": category_counts,
         "total_findings": int(decision.get("total_findings", len(findings)) or 0),
         "effective_findings": int(
             decision.get("effective_findings", len(findings)) or 0
@@ -462,6 +488,7 @@ def authoritative_gate(decision):
         "block_reasons": decision.get("block_reasons", []),
         "warnings": decision.get("warnings", []),
         "severity_counts": source["severity_counts"],
+        "category_counts": source["category_counts"],
         "total_findings": source["total_findings"],
         "effective_findings": source["effective_findings"],
     }
@@ -513,9 +540,20 @@ def render_markdown(result):
     analysis = result.get("analysis")
     coverage = result.get("source_coverage") or {}
     counts = gate.get("severity_counts") or {}
+    category_counts = gate.get("category_counts") or {}
     count_rows = "\n".join(
         f"| {severity} | {counts.get(severity, 0)} |"
         for severity in ("critical", "high", "medium", "low", "secret")
+    )
+    category_rows = "\n".join(
+        f"| {category} | {category_counts.get(category, 0)} |"
+        for category in (
+            "vuln",
+            "misconfig",
+            "secret",
+            "availability",
+            "scanner-error",
+        )
     )
     report_rows = []
     for report in coverage.get("reports") or []:
@@ -543,6 +581,10 @@ def render_markdown(result):
         "| 심각도 | 건수 |",
         "| --- | ---: |",
         count_rows,
+        "",
+        "| 카테고리 | 건수 |",
+        "| --- | ---: |",
+        category_rows,
         "",
         "### 입력 보고서 범위",
         "",

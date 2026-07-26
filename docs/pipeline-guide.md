@@ -324,8 +324,6 @@ security/reports/
   runtime-report.json       # Runtime Validation 결과 (D파트)
   security-summary.json     # Aggregator 통합 결과
   gate-decision.json        # Gate Evaluator 판단 결과
-  ai-security-summary.json  # AI 구조화 설명 (Gate 비차단)
-  ai-security-summary.md    # 사람이 읽는 AI 설명
 ```
 
 ---
@@ -355,57 +353,30 @@ security/reports/
 `security/policies/security-gate-policy.json`에서 관리한다.
 현재 동작과 팀 합의가 필요한 임시 기준은
 [`docs/aggregator-policy-baseline.md`](./aggregator-policy-baseline.md)에 정리한다.
-현재 기준은 Policy v1이며 `pr`, `post_merge`, `training` 프로필을 지원한다.
+이 기준은 Baseline v0.2이며, 목표 정책과 현재 코드 차이를 문서에 명시한다.
 
 | 조건 | 처리 |
 | --- | --- |
-| Critical 탐지 | Merge 차단 |
-| High 탐지 | Merge 차단 |
-| Secret 탐지 | Merge 차단 |
-| Medium 탐지 | PR 댓글 경고 |
-| 모두 통과 | Merge 허용 |
+| 실제 Critical/High `vuln` | 차단 |
+| Secret, 스캐너 기술 실패 | 차단 |
+| High/Critical 가용성 실패 | 차단 |
+| Medium 또는 `misconfig` | 경고 |
+| 승인·소유자·사유·만료일이 유효한 예외 | 판정 제외, 기록 유지 |
+| 모두 통과 | 허용 |
 
 환경변수 `SECURE_GATE_POLICY`로 정책 파일 경로를 오버라이드할 수 있다.
-`SECURE_GATE_PROFILE` 또는 `evaluate-gate.py --profile`로 정책 프로필을 선택한다.
-프로필을 지정하지 않으면 Post-merge 전용 보고서 구성을 감지하고, 그 외에는
-정책 파일의 `defaultProfile`을 사용한다.
-Accepted Risk는 정책 파일과 같은 디렉터리의 `accepted-risks.json`에서 관리하고,
-`SECURE_GATE_EXCEPTIONS` 또는 `--exceptions`로 경로를 오버라이드할 수 있다.
-
-교육용 취약 앱 검증에서는 다음처럼 `training`을 명시한다.
-
-```bash
-SECURE_GATE_PROFILE=training python3 scripts/evaluate-gate.py
-```
-
-`training`은 Critical/High/Medium을 경고로 처리하지만 Secret과 필수 보고서 오류는
-차단한다. 기본 `defaultProfile=pr`은 변경하지 않는다. 자동화 연결 시 A파트가
-PR/Post-merge Workflow 입력을 `SECURE_GATE_PROFILE`로 전달해야 한다.
+`SECURE_GATE_PROFILE` 또는 `evaluate-gate.py --profile`로 `pr`,
+`post_merge`, `training` 프로필을 선택한다.
 
 ---
 
 ## Merge 차단 메커니즘
 
-1. `evaluate-gate.py`가 Critical/High/Secret 탐지 시 `exit 1`
+1. `evaluate-gate.py`가 선택 프로필의 Block 조건 탐지 시 `exit 1`
 2. `aggregate-and-gate` Job 실패 → GitHub Check 실패
 3. Branch Protection Rule에서 해당 Check를 Required로 설정 → Merge 버튼 비활성화
 
 > Settings → Branches → Branch protection rules → Require status checks
-
----
-
-## AI 결과 설명
-
-`scripts/generate-ai-security-summary.py`는 Gate Evaluator 뒤에서
-`gate-decision.json`을 읽어 다음 파일을 생성한다.
-
-- `security/reports/ai-security-summary.json`
-- `security/reports/ai-security-summary.md`
-
-AI는 정규화되고 마스킹된 Finding만 입력받으며, 확정 Gate 상태를 변경하지 않는다.
-`OPENAI_API_KEY` 누락이나 API 실패는 `skipped` 또는 `failed`로 기록하고 Gate를
-차단하지 않는다. 상세 계약은
-[`docs/ai-security-report.md`](./ai-security-report.md)를 따른다.
 
 ---
 
@@ -415,7 +386,8 @@ AI는 정규화되고 마스킹된 Finding만 입력받으며, 확정 Gate 상�
 | --- | --- |
 | `scripts/aggregate-results.py` | 각 보안 결과 파일 통합 |
 | `scripts/evaluate-gate.py` | 정책 기준 Pass/Fail 판단 |
-| `scripts/generate-ai-security-summary.py` | Gate 결과를 구조화된 AI JSON과 읽기 쉬운 Markdown으로 설명 |
+| `scripts/gate_policy.py` | finding 카테고리 분류와 Block/Warn 공통 규칙 |
+| `scripts/generate-ai-security-summary.py` | 확정 Gate 결과의 비차단 AI 요약과 개선 방향 생성 |
 | `scripts/create-pr-comment.py` | GitHub API로 PR 댓글 작성 |
 | `scripts/runtime-validation.py` | Health / Smoke / Header / Custom Check / ZAP / Nuclei / Dynatrace 결과를 `runtime-report.json`으로 생성하고, Post-merge 필수 원본 결과 누락을 검증 |
 | `scripts/fetch-dynatrace-problems.py` | Dynatrace Problems API v2의 열린 문제와 최근 Service entities를 JSON으로 수집 |

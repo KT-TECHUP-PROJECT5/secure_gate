@@ -1,45 +1,51 @@
 {
-  "version": 1,
+  "version": 2,
   "defaultProfile": "pr",
   "profiles": {
     "pr": {
-      "blockOnReportError": true,
-      "blockSeverities": [
-        "critical",
-        "high",
-        "secret"
-      ],
-      "warnSeverities": [
-        "medium"
-      ],
+      "blockOnSecret": true,
+      "blockOnScannerError": true,
+      "blockOnAvailability": true,
+      "blockOnAvailabilityMedium": false,
+      "blockOnVulnCritical": true,
+      "blockOnVulnHigh": true,
+      "warnOnVulnCritical": false,
+      "warnOnVulnHigh": false,
+      "warnOnAvailability": false,
+      "warnOnMedium": true,
+      "warnOnMisconfig": true,
       "unknownSeverity": "block"
     },
     "post_merge": {
-      "blockOnReportError": true,
-      "blockSeverities": [
-        "critical",
-        "high",
-        "secret"
-      ],
-      "warnSeverities": [
-        "medium"
-      ],
+      "blockOnSecret": true,
+      "blockOnScannerError": true,
+      "blockOnAvailability": true,
+      "blockOnAvailabilityMedium": false,
+      "blockOnVulnCritical": true,
+      "blockOnVulnHigh": true,
+      "warnOnVulnCritical": false,
+      "warnOnVulnHigh": false,
+      "warnOnAvailability": false,
+      "warnOnMedium": true,
+      "warnOnMisconfig": true,
       "unknownSeverity": "block"
     },
     "training": {
-      "blockOnReportError": true,
-      "blockSeverities": [
-        "secret"
-      ],
-      "warnSeverities": [
-        "critical",
-        "high",
-        "medium"
-      ],
+      "blockOnSecret": true,
+      "blockOnScannerError": true,
+      "blockOnAvailability": false,
+      "blockOnAvailabilityMedium": false,
+      "blockOnVulnCritical": false,
+      "blockOnVulnHigh": false,
+      "warnOnVulnCritical": true,
+      "warnOnVulnHigh": true,
+      "warnOnAvailability": true,
+      "warnOnMedium": true,
+      "warnOnMisconfig": true,
       "unknownSeverity": "warn"
     }
   },
   "exceptionPolicy": {
-    "file": "accepted-risks.json"
+    "file": "suppressions.json"
   }
 }
