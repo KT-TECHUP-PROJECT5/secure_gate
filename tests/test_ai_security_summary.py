@@ -123,6 +123,22 @@ class AiSecuritySummaryTests(unittest.TestCase):
         )
         self.assertIn("[REDACTED]", runtime_finding["description"])
 
+    def test_source_location_is_only_set_for_real_file_paths(self):
+        source = ai_summary.build_source_payload(self.make_decision(), max_findings=10)
+        runtime_finding = next(
+            finding
+            for finding in source["findings"]
+            if finding["id"] == "runtime.test.high"
+        )
+        secret_finding = next(
+            finding
+            for finding in source["findings"]
+            if finding["id"] == "gitleaks.generic-api-key"
+        )
+
+        self.assertEqual("", runtime_finding["source_location"])
+        self.assertEqual("settings.py:10", secret_finding["source_location"])
+
     def test_request_uses_structured_output_and_does_not_store_response(self):
         source = ai_summary.build_source_payload(self.make_decision(), max_findings=10)
         request = ai_summary.build_openai_request("test-model", source)
@@ -209,6 +225,164 @@ class AiSecuritySummaryTests(unittest.TestCase):
 
         self.assertEqual([], normalized["prioritized_findings"])
         self.assertIn("입력에 없는 finding", normalized["limitations"][0])
+
+    def test_priorities_are_grouped_deduplicated_and_action_ordered(self):
+        decision = {
+            "gate_status": "FAILED",
+            "blocked": True,
+            "policy_profile": "post_merge",
+            "reports": {
+                "runtime_validation": {
+                    "status": "failed",
+                    "findings": [
+                        {
+                            "id": "runtime.custom.admin-access.user-role",
+                            "severity": "high",
+                            "category": "vuln",
+                            "title": "Non-admin user can access administrator page",
+                            "description": "Authorization is missing.",
+                            "location": "https://example.test/admin",
+                        },
+                        {
+                            "id": "runtime.custom.search-sqli.private-posts",
+                            "severity": "high",
+                            "category": "vuln",
+                            "title": "Search query exposes private posts",
+                            "description": "SQL injection exposes private records.",
+                            "location": "https://example.test/posts",
+                        },
+                        {
+                            "id": "runtime.custom.reflected-xss.keyword",
+                            "severity": "high",
+                            "category": "vuln",
+                            "title": "Search keyword is reflected without escaping",
+                            "description": "Reflected XSS.",
+                            "location": "https://example.test/posts",
+                        },
+                        {
+                            "id": "runtime.zap.40012",
+                            "severity": "high",
+                            "category": "vuln",
+                            "title": "Cross Site Scripting (Reflected)",
+                            "description": "ZAP confirmed reflected XSS.",
+                            "location": "https://example.test/posts",
+                        },
+                        {
+                            "id": "runtime.nuclei.xss-fuzz",
+                            "severity": "medium",
+                            "category": "vuln",
+                            "title": "Fuzzing Parameters - Cross-Site Scripting",
+                            "description": "Nuclei confirmed XSS.",
+                            "location": "https://example.test/posts",
+                        },
+                    ],
+                },
+                "sast": {
+                    "status": "failed",
+                    "findings": [
+                        {
+                            "id": "semgrep.template-unescaped",
+                            "severity": "high",
+                            "category": "vuln",
+                            "title": "XSS output is not escaped",
+                            "description": "Template output is marked safe.",
+                            "location": "web/app/templates/posts.html:42",
+                        }
+                    ],
+                },
+            },
+        }
+        source = ai_summary.build_source_payload(decision, max_findings=20)
+        analysis = {
+            "executive_summary": "요약",
+            "key_observations": [],
+            "prioritized_findings": [
+                {
+                    "finding_id": "runtime.zap.40012",
+                    "location": "https://example.test/posts",
+                    "risk": "XSS",
+                    "remediation": "출력 인코딩",
+                },
+                {
+                    "finding_id": "runtime.nuclei.xss-fuzz",
+                    "location": "https://example.test/posts",
+                    "risk": "XSS",
+                    "remediation": "출력 인코딩",
+                },
+                {
+                    "finding_id": "runtime.custom.search-sqli.private-posts",
+                    "location": "https://example.test/posts",
+                    "risk": "SQLi",
+                    "remediation": "파라미터 바인딩",
+                },
+                {
+                    "finding_id": "runtime.custom.admin-access.user-role",
+                    "location": "https://example.test/admin",
+                    "risk": "권한 우회",
+                    "remediation": "서버 권한 검사",
+                },
+            ],
+            "report_reading_guide": [],
+            "limitations": [],
+        }
+
+        normalized = ai_summary.normalize_prioritized_findings(analysis, source)
+        priorities = normalized["prioritized_findings"]
+
+        self.assertEqual(
+            ["access-control", "sql-injection", "xss"],
+            [item["remediation_group"] for item in priorities],
+        )
+        xss = priorities[2]
+        self.assertEqual(4, len(xss["related_findings"]))
+        self.assertEqual(
+            ["web/app/templates/posts.html:42"],
+            xss["source_locations"],
+        )
+        self.assertIn("중복 우선순위 항목 1건", normalized["report_reading_guide"][0])
+
+    def test_markdown_compacts_gate_messages_and_marks_runtime_only_source(self):
+        decision = self.make_decision()
+        decision["block_reasons"] = [
+            "HIGH: Cross Site Scripting (Reflected)",
+            "HIGH: Cross Site Scripting (Persistent)",
+        ]
+        decision["warnings"] = [
+            "Missing security header: x-frame-options",
+            "Content Security Policy Header Not Set",
+            "X-Content-Type-Options Header Missing",
+        ]
+        source = ai_summary.build_source_payload(decision, max_findings=10)
+        analysis = {
+            "executive_summary": "요약",
+            "key_observations": [],
+            "prioritized_findings": [
+                {
+                    "finding_id": "runtime.test.high",
+                    "location": "https://example.test/login",
+                    "risk": "위험",
+                    "remediation": "수정",
+                }
+            ],
+            "report_reading_guide": [],
+            "limitations": [],
+        }
+        normalized = ai_summary.normalize_prioritized_findings(analysis, source)
+        result = ai_summary.result_payload(
+            "succeeded",
+            "test-model",
+            Path("gate-decision.json"),
+            decision,
+            analysis=normalized,
+            source_payload=source,
+        )
+
+        markdown = ai_summary.render_markdown(result)
+
+        self.assertIn("- XSS 공통 출력 경로 수정: `2건`", markdown)
+        self.assertIn("- 보안 헤더·전송 설정 보완: `3건`", markdown)
+        self.assertIn("소스 위치: 런타임 결과만으로 특정 불가", markdown)
+        self.assertNotIn("Cross Site Scripting (Persistent)", markdown)
 
     def test_markdown_keeps_authoritative_gate_separate(self):
         decision = self.make_decision()

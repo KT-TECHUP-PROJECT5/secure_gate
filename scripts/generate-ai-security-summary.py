@@ -38,6 +38,24 @@ SECRET_ASSIGNMENT_PATTERN = re.compile(
     r"(?i)\b(api[-_ ]?key|token|password|secret)\s*[:=]\s*[^\s,;]+"
 )
 OPENAI_KEY_PATTERN = re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b")
+SOURCE_PATH_PATTERN = re.compile(
+    r"(?i)(?:^|/)[^/\s]+\.(?:py|js|jsx|ts|tsx|java|kt|go|rb|php|cs|"
+    r"c|cc|cpp|h|hpp|vue|svelte|html|jinja|j2|yaml|yml|json|toml|xml)"
+    r"(?::\d+(?::\d+)?)?$"
+)
+
+REMEDIATION_GROUPS = {
+    "scanner-error": ("검사 신뢰성 복구", 0),
+    "availability": ("서비스 가용성 복구", 1),
+    "secret": ("노출 자격증명 폐기·교체", 2),
+    "access-control": ("권한 검증·IDOR 차단", 3),
+    "sql-injection": ("SQL Injection 제거", 4),
+    "command-injection": ("명령·코드 Injection 제거", 5),
+    "xss": ("XSS 공통 출력 경로 수정", 6),
+    "dependency": ("취약 의존성 업데이트", 7),
+    "exposure": ("Debug·Docs 노출 축소", 8),
+    "security-headers": ("보안 헤더·전송 설정 보완", 9),
+}
 
 AI_ANALYSIS_SCHEMA = {
     "type": "object",
@@ -141,13 +159,130 @@ def sanitize_location(value):
     return location
 
 
+def source_location_from(location):
+    if not isinstance(location, str):
+        return ""
+    sanitized = sanitize_location(location)
+    parsed = urllib.parse.urlsplit(sanitized)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        return ""
+    if SOURCE_PATH_PATTERN.search(sanitized):
+        return sanitized
+    return ""
+
+
+def classify_remediation_group(finding):
+    severity = str(finding.get("severity") or "").lower()
+    category = str(finding.get("category") or "").lower()
+    finding_id = str(finding.get("id") or "").lower()
+    text = " ".join(
+        str(finding.get(field) or "").lower()
+        for field in ("id", "title", "description")
+    )
+
+    if category == "scanner-error":
+        key = "scanner-error"
+    elif category == "availability":
+        key = "availability"
+    elif severity == "secret" or category == "secret":
+        key = "secret"
+    elif any(
+        token in text
+        for token in (
+            "idor",
+            "admin-access",
+            "administrator page",
+            "authorization",
+            "access control",
+            "권한",
+            "관리자 접근",
+        )
+    ):
+        key = "access-control"
+    elif any(
+        token in text
+        for token in (
+            "sql injection",
+            "search-sqli",
+            "sqli",
+            "sql 인젝션",
+            "search query exposes private posts",
+        )
+    ):
+        key = "sql-injection"
+    elif any(
+        token in text
+        for token in ("private post", "private object", "타인 비공개")
+    ):
+        key = "access-control"
+    elif any(
+        token in text
+        for token in (
+            "command injection",
+            "code injection",
+            "rce",
+            "remote code execution",
+        )
+    ):
+        key = "command-injection"
+    elif any(
+        token in text
+        for token in (
+            "cross site scripting",
+            "cross-site scripting",
+            "xss",
+            "reflected without escaping",
+        )
+    ):
+        key = "xss"
+    elif any(
+        token in text
+        for token in ("cve-", "dependency", "vulnerable package", "취약 의존성")
+    ):
+        key = "dependency"
+    elif any(
+        token in text
+        for token in (
+            "debug-exposure",
+            "docs-exposure",
+            "debug endpoint",
+            "documentation endpoint",
+            "/docs",
+            "/redoc",
+        )
+    ):
+        key = "exposure"
+    elif any(
+        token in text
+        for token in (
+            "security header",
+            "content security policy",
+            "content-security-policy",
+            "x-frame-options",
+            "x-content-type-options",
+            "clickjacking header",
+            "http only site",
+            "보안 헤더",
+        )
+    ):
+        key = "security-headers"
+    else:
+        key = f"finding:{finding_id or 'unknown'}"
+
+    label, priority = REMEDIATION_GROUPS.get(
+        key,
+        (str(finding.get("title") or finding.get("id") or "기타 보안 이슈"), 50),
+    )
+    return key, label, priority
+
+
 def safe_finding(report_key, finding):
     severity = str(finding.get("severity") or "unknown").strip().lower()
     description = finding.get("description", "")
     if severity == "secret":
         description = "Secret value omitted. Rotate or revoke the credential."
 
-    return {
+    safe = {
         "report": str(report_key),
         "id": redact_text(finding.get("id", "unknown"), limit=300),
         "severity": severity,
@@ -155,7 +290,13 @@ def safe_finding(report_key, finding):
         "title": redact_text(finding.get("title", "Untitled finding"), limit=500),
         "description": redact_text(description),
         "location": sanitize_location(finding.get("location", "unknown")),
+        "source_location": source_location_from(finding.get("location", "")),
     }
+    group_key, group_label, group_priority = classify_remediation_group(safe)
+    safe["remediation_group"] = group_key
+    safe["remediation_group_label"] = group_label
+    safe["remediation_priority"] = group_priority
+    return safe
 
 
 def severity_counts_from(decision, findings):
@@ -236,6 +377,7 @@ def build_source_payload(decision, max_findings):
 
     findings.sort(
         key=lambda item: (
+            item["remediation_priority"],
             SEVERITY_ORDER.get(item["severity"], 99),
             item["id"],
             item["location"],
@@ -281,8 +423,18 @@ def build_openai_request(model, source_payload):
         "Use only the supplied normalized findings. The deterministic Gate status "
         "is authoritative: never change, override, or recalculate it. "
         "Summarize the whole report, explain how to read it, and provide short, "
-        "practical remediation directions. Prioritize at most 10 real findings. "
+        "practical remediation directions. Prioritize remediation groups rather "
+        "than listing every scanner alert. Return at most one representative "
+        "finding per remediation_group. Treat findings from multiple scanners in "
+        "the same remediation_group as corroborating evidence, not separate fixes. "
+        "Use this default action order when present: credentials and scanner "
+        "failures, authorization/IDOR, SQL injection, shared XSS output paths, "
+        "debug/docs exposure, then headers and lower-risk misconfiguration. "
+        "Prioritize at most 10 real findings. "
         "Do not invent finding IDs, locations, exploit evidence, or fixed versions. "
+        "Use source_location only when it is supplied. When it is empty, state "
+        "that runtime evidence cannot identify a source file; never guess one. "
+        "Keep warning discussion compact and avoid repeating header findings. "
         "State uncertainty and scanner limitations explicitly."
     )
     user_prompt = (
@@ -420,11 +572,15 @@ def normalize_prioritized_findings(analysis, source_payload):
         for finding in source_payload["findings"]
     }
     findings_by_id = {}
+    findings_by_group = {}
     for finding in source_payload["findings"]:
         findings_by_id.setdefault(finding["id"], []).append(finding)
+        findings_by_group.setdefault(finding["remediation_group"], []).append(finding)
 
     normalized = []
     rejected = 0
+    duplicate_groups = 0
+    selected_groups = set()
     for recommendation in analysis["prioritized_findings"][:10]:
         if not isinstance(recommendation, dict):
             rejected += 1
@@ -440,12 +596,51 @@ def normalize_prioritized_findings(analysis, source_payload):
                 rejected += 1
                 continue
 
+        group_key = source_finding["remediation_group"]
+        if group_key in selected_groups:
+            duplicate_groups += 1
+            continue
+        selected_groups.add(group_key)
+        related = findings_by_group.get(group_key, [source_finding])
+        related_findings = []
+        seen_related = set()
+        source_locations = []
+        runtime_locations = []
+        for item in related:
+            related_key = (item["id"], item["location"])
+            if related_key not in seen_related:
+                seen_related.add(related_key)
+                related_findings.append(
+                    {
+                        "id": item["id"],
+                        "title": item["title"],
+                        "location": item["location"],
+                        "report": item["report"],
+                    }
+                )
+            if item["source_location"] and item["source_location"] not in source_locations:
+                source_locations.append(item["source_location"])
+            elif (
+                not item["source_location"]
+                and item["location"] not in {"", "unknown"}
+                and item["location"] not in runtime_locations
+            ):
+                runtime_locations.append(item["location"])
+
         normalized.append(
             {
                 "finding_id": source_finding["id"],
                 "title": source_finding["title"],
                 "severity": source_finding["severity"],
                 "location": source_finding["location"],
+                "remediation_group": group_key,
+                "remediation_group_label": source_finding[
+                    "remediation_group_label"
+                ],
+                "remediation_priority": source_finding["remediation_priority"],
+                "related_findings": related_findings,
+                "source_locations": source_locations[:10],
+                "runtime_locations": runtime_locations[:10],
                 "risk": redact_text(recommendation.get("risk", ""), limit=1000),
                 "remediation": redact_text(
                     recommendation.get("remediation", ""),
@@ -454,6 +649,13 @@ def normalize_prioritized_findings(analysis, source_payload):
             }
         )
 
+    normalized.sort(
+        key=lambda item: (
+            item["remediation_priority"],
+            SEVERITY_ORDER.get(item["severity"], 99),
+            item["finding_id"],
+        )
+    )
     analysis = dict(analysis)
     analysis["executive_summary"] = redact_text(
         analysis["executive_summary"],
@@ -478,6 +680,10 @@ def normalize_prioritized_findings(analysis, source_payload):
     if rejected:
         analysis["limitations"].append(
             f"입력에 없는 finding 참조 {rejected}건을 결과에서 제외했습니다."
+        )
+    if duplicate_groups:
+        analysis["report_reading_guide"].append(
+            f"동일 수정 그룹의 중복 우선순위 항목 {duplicate_groups}건을 통합했습니다."
         )
     return analysis
 
@@ -536,6 +742,41 @@ def markdown_list(items, empty_text="- 없음"):
 
 def markdown_cell(value):
     return str(value).replace("|", "\\|").replace("\n", " ")
+
+
+def compact_gate_messages(messages):
+    grouped = {}
+    for message in messages or []:
+        if not isinstance(message, str):
+            continue
+        key, label, priority = classify_remediation_group(
+            {
+                "id": message,
+                "title": message,
+                "description": message,
+            }
+        )
+        if key.startswith("finding:"):
+            group_key = "other"
+            label = "기타 보안 이슈"
+            priority = 90
+        else:
+            group_key = key
+        grouped.setdefault(
+            group_key,
+            {"label": label, "priority": priority, "count": 0},
+        )
+        grouped[group_key]["count"] += 1
+
+    if not grouped:
+        return "- 없음"
+    ordered = sorted(
+        grouped.values(),
+        key=lambda item: (item["priority"], item["label"]),
+    )
+    return "\n".join(
+        f"- {item['label']}: `{item['count']}건`" for item in ordered
+    )
 
 
 def render_markdown(result):
@@ -598,13 +839,15 @@ def render_markdown(result):
         f"- AI 전달 Finding: `{coverage.get('findings_sent_to_ai', 0)}`",
         f"- AI 전달 제외 Finding: `{coverage.get('findings_omitted_from_ai', 0)}`",
         "",
-        "### 차단 사유",
+        "### 차단 사유 요약",
         "",
-        markdown_list(gate.get("block_reasons", [])),
+        compact_gate_messages(gate.get("block_reasons", [])),
         "",
-        "### 경고",
+        "### 경고 요약",
         "",
-        markdown_list(gate.get("warnings", [])),
+        compact_gate_messages(gate.get("warnings", [])),
+        "",
+        "전체 원문은 `gate-decision.json`의 `block_reasons`와 `warnings`에서 확인합니다.",
         "",
         "## AI 설명",
         "",
@@ -638,11 +881,29 @@ def render_markdown(result):
             ):
                 lines.extend(
                     [
-                        f"#### {index}. {finding['title']}",
+                        f"#### {index}. {finding['remediation_group_label']}",
                         "",
-                        f"- ID: `{finding['finding_id']}`",
+                        f"- 대표 Finding: `{finding['finding_id']}`",
                         f"- 심각도: `{finding['severity']}`",
-                        f"- 위치: `{finding['location']}`",
+                        f"- 관련 탐지: `{len(finding['related_findings'])}건`",
+                        "- 런타임 위치: "
+                        + (
+                            ", ".join(
+                                f"`{location}`"
+                                for location in finding["runtime_locations"]
+                            )
+                            if finding["runtime_locations"]
+                            else "`없음`"
+                        ),
+                        "- 소스 위치: "
+                        + (
+                            ", ".join(
+                                f"`{location}`"
+                                for location in finding["source_locations"]
+                            )
+                            if finding["source_locations"]
+                            else "런타임 결과만으로 특정 불가"
+                        ),
                         f"- 위험: {finding['risk']}",
                         f"- 개선 방향: {finding['remediation']}",
                         "",

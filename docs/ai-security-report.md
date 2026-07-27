@@ -52,6 +52,16 @@ AI에는 ZAP, Nuclei, Gitleaks, Trivy 원본 파일을 직접 보내지 않는�
 - 기본 최대 80개 Finding만 전송
 - OpenAI Responses API 요청에 `store=false` 적용
 - 입력에 없는 Finding을 AI가 제시하면 결과에서 제거
+- `file.py:line`처럼 실제 보고서에 포함된 소스 위치만 전달
+- 런타임 URL만 있는 Finding은 소스 파일을 추측하지 않음
+
+AI 응답을 받은 뒤에는 결정적인 후처리를 한 번 더 수행한다.
+
+- 권한·IDOR → SQL Injection → XSS 공통 출력 경로 → Debug·Docs → 헤더 순으로 정렬
+- 같은 수정 원인에 속한 ZAP·Nuclei·Custom Finding은 하나의 개선 그룹으로 통합
+- 각 그룹에 대표 Finding, 관련 탐지 수, 런타임 위치, 확인된 소스 위치를 기록
+- 소스 위치가 없으면 `런타임 결과만으로 특정 불가`로 표시
+- Markdown의 차단 사유와 경고는 그룹별 건수로 축약하고 원문은 `gate-decision.json`에 보존
 
 ## 4. 실행 방법
 
@@ -124,6 +134,8 @@ API Key가 없으면 `status=skipped` 보고서와 확정 Gate 판정이 들어�
 - 차단 사유와 경고
 - AI 전체 요약
 - 우선 개선 항목
+- 수정 원인별 관련 탐지 묶음
+- 확인된 소스 위치 또는 런타임 전용 한계 표시
 - 취약점별 간단한 개선 방향
 - 리포트 해석 한계
 
