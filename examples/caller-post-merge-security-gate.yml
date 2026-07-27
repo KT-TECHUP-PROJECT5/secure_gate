@@ -44,3 +44,5 @@ jobs:
       ZAP_AUTH_PASSWORD: ${{ secrets.ZAP_AUTH_PASSWORD }}
       CUSTOM_RUNTIME_PASSWORD: ${{ secrets.CUSTOM_RUNTIME_PASSWORD }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # Optional: hard-gate summary to Discord (skip if unset)
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}

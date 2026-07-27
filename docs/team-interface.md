@@ -181,7 +181,7 @@ Aggregator/Policy와 비차단 AI 설명은 아래 기준선으로 진행한다.
 | AI 참고 문서                 | `docs/AI-reference.md`                                            | 반영                     |
 | IR 플레이북                  | `docs/incident-response-playbook.md` (사람 대응/SLA)              | 반영                     |
 | ZAP XSS 탐지 고도화          | DAST 고도화로 이관                                                | 보류                     |
-| Discord/Telegram 요약 알림   | Gate 요약 연동                                                    | 다음 작업 후보           |
+| Discord 요약 알림            | Soft/Hard `gate-decision` 요약 webhook (`docs/discord-notification.md`) | 구현 중                  |
 
 ---
 
