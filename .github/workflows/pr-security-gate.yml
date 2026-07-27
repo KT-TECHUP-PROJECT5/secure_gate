@@ -121,10 +121,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: "[Placeholder] Build and Test"
+        env:
+          CONFIGURED_BUILD_COMMAND: ${{ inputs.build_command }}
         run: |
           echo "Build and Test placeholder - replace with actual build/test commands"
-          if [ -n "${{ inputs.build_command }}" ]; then
-            echo "Configured build_command: ${{ inputs.build_command }}"
+          if [ -n "$CONFIGURED_BUILD_COMMAND" ]; then
+            echo "A build_command is configured."
           fi
           mkdir -p security/reports
           cat > security/reports/build-report.json <<'EOF'
@@ -255,10 +257,11 @@ jobs:
 
       - name: Resolve Dockerfile and scan mode
         id: resolve-dockerfile
+        env:
+          INPUT_PATH: ${{ inputs.dockerfile_path }}
+          CONTEXT: ${{ inputs.docker_build_context }}
         run: |
           set -euo pipefail
-          INPUT_PATH="${{ inputs.dockerfile_path }}"
-          CONTEXT="${{ inputs.docker_build_context }}"
           DOCKERFILE=""
 
           if [ -n "$INPUT_PATH" ]; then
@@ -290,21 +293,23 @@ jobs:
 
       - name: Build image for Trivy (Dockerfile branch)
         if: steps.resolve-dockerfile.outputs.mode == 'image'
+        env:
+          DOCKERFILE: ${{ steps.resolve-dockerfile.outputs.dockerfile }}
+          CONTEXT: ${{ steps.resolve-dockerfile.outputs.context }}
+          IMAGE_TAG: secure-gate-scan:${{ github.sha }}
         run: |
           set -euo pipefail
-          DOCKERFILE="${{ steps.resolve-dockerfile.outputs.dockerfile }}"
-          CONTEXT="${{ steps.resolve-dockerfile.outputs.context }}"
-          IMAGE_TAG="secure-gate-scan:${{ github.sha }}"
           echo "Building ${IMAGE_TAG} from -f ${DOCKERFILE} ${CONTEXT}"
           docker build -f "${DOCKERFILE}" -t "${IMAGE_TAG}" "${CONTEXT}"
 
       - name: Run Trivy CVE scan
         id: trivy-cve
+        env:
+          MODE: ${{ steps.resolve-dockerfile.outputs.mode }}
+          IMAGE_TAG: secure-gate-scan:${{ github.sha }}
         run: |
           set -euo pipefail
           mkdir -p security/reports
-          MODE="${{ steps.resolve-dockerfile.outputs.mode }}"
-          IMAGE_TAG="secure-gate-scan:${{ github.sha }}"
 
           if [ "$MODE" = "image" ]; then
             trivy image \
@@ -327,11 +332,12 @@ jobs:
 
       - name: Generate CycloneDX SBOM
         id: trivy-sbom
+        env:
+          MODE: ${{ steps.resolve-dockerfile.outputs.mode }}
+          IMAGE_TAG: secure-gate-scan:${{ github.sha }}
         run: |
           set -euo pipefail
           mkdir -p security/reports
-          MODE="${{ steps.resolve-dockerfile.outputs.mode }}"
-          IMAGE_TAG="secure-gate-scan:${{ github.sha }}"
 
           if [ "$MODE" = "image" ]; then
             trivy image \
@@ -387,13 +393,16 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_REF: ${{ github.ref }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
+          DEPENDENCY_TRACK_SERVICE_NAME: ${{ inputs.dependency_track_service_name }}
+          DEPENDENCY_TRACK_PROJECT_VERSION: ${{ inputs.dependency_track_project_version }}
+          DEPENDENCY_TRACK_UPLOAD_MODE: ${{ inputs.dependency_track_upload_mode }}
         run: |
           python3 .secure-gate/scripts/upload-sbom-to-dependency-track.py \
             --sbom security/reports/sbom.cdx.json \
-            --repository "${{ github.repository }}" \
-            --service-name "${{ inputs.dependency_track_service_name }}" \
-            --project-version "${{ inputs.dependency_track_project_version }}" \
-            --upload-mode "${{ inputs.dependency_track_upload_mode }}" \
+            --repository "$GITHUB_REPOSITORY" \
+            --service-name "$DEPENDENCY_TRACK_SERVICE_NAME" \
+            --project-version "$DEPENDENCY_TRACK_PROJECT_VERSION" \
+            --upload-mode "$DEPENDENCY_TRACK_UPLOAD_MODE" \
             --report security/reports/dependency-track-upload-report.json
 
       - name: Ensure Dependency-Track upload report
@@ -409,10 +418,12 @@ jobs:
       - name: Snapshot dependency-scan history
         id: dependency_scan_history
         if: always()
+        env:
+          SCAN_MODE: ${{ steps.resolve-dockerfile.outputs.mode }}
         run: |
           python3 .secure-gate/scripts/snapshot-dependency-scan-history.py \
             --reports-dir security/reports \
-            --mode "${{ steps.resolve-dockerfile.outputs.mode }}" \
+            --mode "$SCAN_MODE" \
             --trivy-version "0.70.0" \
             --cyclonedx-spec "1.6"
 
@@ -457,19 +468,27 @@ jobs:
 
       - name: Install dependencies
         if: inputs.install_command != ''
-        run: ${{ inputs.install_command }}
+        env:
+          INSTALL_COMMAND: ${{ inputs.install_command }}
+        run: bash -euo pipefail -c "$INSTALL_COMMAND"
 
       - name: Build application
         if: inputs.build_command != ''
-        run: ${{ inputs.build_command }}
+        env:
+          BUILD_COMMAND: ${{ inputs.build_command }}
+        run: bash -euo pipefail -c "$BUILD_COMMAND"
 
       - name: Start application (runner-local)
         if: inputs.start_command != ''
+        env:
+          START_COMMAND: ${{ inputs.start_command }}
+          APP_PORT: ${{ inputs.app_port }}
+          HEALTH_PATH: ${{ inputs.health_path }}
         run: |
           set -euo pipefail
-          ${{ inputs.start_command }} &
+          bash -euo pipefail -c "$START_COMMAND" &
           echo $! > /tmp/secure-gate-app.pid
-          TARGET="http://127.0.0.1:${{ inputs.app_port }}${{ inputs.health_path }}"
+          TARGET="http://127.0.0.1:${APP_PORT}${HEALTH_PATH}"
           echo "Waiting for app at ${TARGET}"
           for _ in $(seq 1 30); do
             if curl -fsS "$TARGET" >/dev/null 2>&1; then
@@ -519,10 +538,12 @@ jobs:
 
       - name: Verify runtime target health
         if: inputs.enable_dast && steps.dast-target.outputs.url != ''
+        env:
+          TARGET_URL: ${{ steps.dast-target.outputs.url }}
+          HEALTH_PATH: ${{ inputs.health_path }}
         run: |
           set -euo pipefail
-          TARGET_URL="${{ steps.dast-target.outputs.url }}"
-          HEALTH_URL="${TARGET_URL%/}${{ inputs.health_path }}"
+          HEALTH_URL="${TARGET_URL%/}${HEALTH_PATH}"
           for _ in $(seq 1 30); do
             if curl --fail --silent --show-error "$HEALTH_URL" >/dev/null; then
               echo "Runtime target is healthy: ${HEALTH_URL}"
@@ -542,18 +563,22 @@ jobs:
 
       - name: Run ZAP PR validation
         if: inputs.enable_dast && steps.dast-target.outputs.url != ''
+        env:
+          SCAN_URL: ${{ steps.dast-target.outputs.scan_url }}
         run: |
           python3 .secure-gate/scripts/run-zap-validation.py \
             --profile pr \
-            --target-url "${{ steps.dast-target.outputs.scan_url }}" \
+            --target-url "$SCAN_URL" \
             --reports-dir security/reports
 
       - name: Run Nuclei PR validation
         if: inputs.enable_dast && steps.dast-target.outputs.url != ''
+        env:
+          SCAN_URL: ${{ steps.dast-target.outputs.scan_url }}
         run: |
           python3 .secure-gate/scripts/run-nuclei-validation.py \
             --profile pr \
-            --target-url "${{ steps.dast-target.outputs.scan_url }}" \
+            --target-url "$SCAN_URL" \
             --trivy-report security/reports/dependency-report.json \
             --reports-dir security/reports
 
@@ -561,10 +586,12 @@ jobs:
         if: always()
         env:
           RUNTIME_REQUIRED_REPORTS: ${{ inputs.enable_dast && 'zap,nuclei,nuclei-coverage' || 'none' }}
+          RUNTIME_BASE_URL: ${{ steps.dast-target.outputs.url }}
+          HEALTH_PATH: ${{ inputs.health_path }}
         run: |
           python3 .secure-gate/scripts/runtime-validation.py \
-            --base-url "${{ steps.dast-target.outputs.url }}" \
-            --health-path "${{ inputs.health_path }}" \
+            --base-url "$RUNTIME_BASE_URL" \
+            --health-path "$HEALTH_PATH" \
             --output security/reports/runtime-report.json
 
       - name: Stop application
@@ -718,9 +745,10 @@ jobs:
 
       - name: Resolve policy file
         id: policy
+        env:
+          CALLER_POLICY: ${{ inputs.policy_path }}
         run: |
           set -euo pipefail
-          CALLER_POLICY="${{ inputs.policy_path }}"
           DEFAULT_POLICY=".secure-gate/security/policies/security-gate-policy.json"
           if [ -n "$CALLER_POLICY" ] && [ -f "$CALLER_POLICY" ]; then
             echo "path=${CALLER_POLICY}" >> "$GITHUB_OUTPUT"
