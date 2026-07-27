@@ -188,7 +188,7 @@ CVE 근거를 기록하되 기존 Gate 판정은 바꾸지 않는다.
 | 예외 승인 | `security/policies/suppressions.json` | 검증 및 판정 반영 |
 | AI 설명 | `generate-ai-security-summary.py` | Gate 이후 비차단 설명으로 반영 |
 | AI 보고서 참고 | `docs/AI-reference.md` | 반영 |
-| IR 플레이북 | `docs/incident-response-playbook.md` | 반영 |
+| IR 플레이북 | `docs/IR-playbook.md` | 반영 |
 | ZAP XSS 탐지 고도화 | 별도 DAST 과제 | 보류 |
 
 CVE 트랙은 category 판정 **이후** dependency(`CVE-*`) finding만 보정한다.

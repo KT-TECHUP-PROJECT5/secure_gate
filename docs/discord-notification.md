@@ -84,6 +84,6 @@ python3 scripts/notify-discord.py --decision security/reports/gate-decision.json
 
 ## 관련 문서
 
-- `docs/incident-response-playbook.md` — 알림 이후 사람 대응
+- `docs/IR-playbook.md` — 알림 이후 사람 대응
 - `docs/AI-reference.md` — AI 상세 보고서는 별도 채널
 - `docs/aggregator-policy-baseline.md` — Block/Warn 기준

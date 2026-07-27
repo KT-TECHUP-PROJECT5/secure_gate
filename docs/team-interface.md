@@ -179,7 +179,7 @@ Aggregator/Policy와 비차단 AI 설명은 아래 기준선으로 진행한다.
 | AI 결과 보고서               | 확정 Gate 뒤에서 요약·개선 방향 생성, 판정에는 영향 없음          | PR/Post-merge 연결 완료  |
 | CVE 보정 트랙                | Dependency CVE를 KEV·EPSS 근거로 보정, 기본 monitor/annotateOnly  | 코드 반영                |
 | AI 참고 문서                 | `docs/AI-reference.md`                                            | 반영                     |
-| IR 플레이북                  | `docs/incident-response-playbook.md` (사람 대응/SLA)              | 반영                     |
+| IR 플레이북                  | `docs/IR-playbook.md` (사람 대응/SLA)              | 반영                     |
 | ZAP XSS 탐지 고도화          | DAST 고도화로 이관                                                | 보류                     |
 | Discord 요약 알림            | Soft/Hard `gate-decision` 요약 webhook (`docs/discord-notification.md`) | 구현 중                  |
 

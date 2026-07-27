@@ -10,7 +10,7 @@ Version: 0.1.0
 AI 상세 보고서(PR soft gate)를 만들 때 읽어야 할 산출물, 정책 해석, 기본 조치 문구를 정리한다.
 이 문서는 **프롬프트/후처리 참고용**이며, Gate 판정 로직을 대체하지 않는다.
 
-사고 대응(SLA·키 폐기 순서·담당자)은 `docs/incident-response-playbook.md`에서 다룬다.
+사고 대응(SLA·키 폐기 순서·담당자)은 `docs/IR-playbook.md`에서 다룬다.
 Gate/AI 경로에는 포함하지 않고, 필요 시 링크만 안내한다.
 
 ---
@@ -240,4 +240,4 @@ PR soft gate 댓글·AI 보고서는 같은 뼈대를 공유한다.
 - `docs/cve-track-integration.md` — CVE 보정 설계
 - `docs/team-interface.md` — 공통 finding 스키마 / 파트 연동
 - `security/templates/pr-comment-template.md` — PR 댓글 뼈대
-- `docs/incident-response-playbook.md` — 사고/이슈 대응 운영 플레이북
+- `docs/IR-playbook.md` — 사고/이슈 대응 운영 플레이북
