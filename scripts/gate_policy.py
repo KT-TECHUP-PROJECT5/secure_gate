@@ -98,6 +98,7 @@ def infer_category(finding: dict) -> str:
         plugin_id = finding_id.rsplit(".", 1)[-1]
         if plugin_id in ZAP_MISCONFIG_PLUGIN_IDS:
             return "misconfig"
+        return "vuln"
 
     if any(keyword in blob for keyword in MISCONFIG_KEYWORDS):
         return "misconfig"
@@ -194,6 +195,13 @@ def should_warn_finding(finding: dict, policy: dict) -> bool:
     category = infer_category(finding)
     severity = _lower(finding.get("severity"))
 
+    if category == "vuln":
+        if severity == "critical" and policy.get("warnOnVulnCritical", False):
+            return True
+        if severity == "high" and policy.get("warnOnVulnHigh", False):
+            return True
+    if category == "availability" and policy.get("warnOnAvailability", False):
+        return True
     if category == "misconfig" and policy.get("warnOnMisconfig", True):
         return True
     if severity == "medium" and policy.get("warnOnMedium", True):

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Run the D-part Nuclei scan and optional Trivy CVE-targeted scan.
+Run the D-part Nuclei scan and optional PR Trivy CVE-targeted scan.
 
 The script keeps pipeline orchestration thin:
 1. Convert Trivy High/Critical CVEs to Nuclei template IDs.
@@ -8,6 +8,9 @@ The script keeps pipeline orchestration thin:
 3. List matching installed templates before starting the targeted scan.
 4. Skip the targeted scan when no template matches.
 5. Merge both JSONL reports and write coverage metadata.
+
+The post-merge profile never consumes Trivy input. It runs only the broad base
+scan so dependency scanning and runtime scanning remain independent.
 """
 
 import argparse
@@ -512,6 +515,7 @@ def main():
     args = parse_args()
     reports_dir = args.reports_dir.resolve()
     reports_dir.mkdir(parents=True, exist_ok=True)
+    trivy_targeting_enabled = args.profile != "post-merge"
 
     candidate_path = reports_dir / "nuclei-cve-ids.txt"
     matched_path = reports_dir / "nuclei-cve-matched-templates.txt"
@@ -525,19 +529,29 @@ def main():
     baseline_findings = 0
     targeted_findings = 0
     coverage_status = "skipped"
-    coverage_reason = "trivy-report-not-processed"
+    coverage_reason = (
+        "trivy-report-not-processed"
+        if trivy_targeting_enabled
+        else "disabled-for-post-merge-full-scan"
+    )
+    required_trivy_missing = False
 
     for output_path in (candidate_path, matched_path, baseline_path, targeted_path):
         touch_empty(output_path)
 
     try:
         validate_target_url(args.target_url)
-        if not args.converter.is_file():
+        if trivy_targeting_enabled and not args.converter.is_file():
             raise NucleiExecutionError(
                 f"Trivy converter not found: {args.converter}"
             )
 
-        if args.trivy_report.is_file():
+        if not trivy_targeting_enabled:
+            print(
+                "[INFO] Trivy CVE targeting disabled for post-merge full scan",
+                flush=True,
+            )
+        elif args.trivy_report.is_file():
             print("[INFO] Extracting Trivy High/Critical CVE candidates", flush=True)
             run_trivy_converter(
                 args.converter,
@@ -548,8 +562,13 @@ def main():
             candidate_count = len(nonempty_lines(candidate_path))
             coverage_reason = "no-high-critical-cve-candidate"
         elif args.require_trivy_report:
-            raise NucleiExecutionError(
-                f"Trivy report not found: {args.trivy_report}"
+            required_trivy_missing = True
+            coverage_status = "failed"
+            coverage_reason = "trivy-report-not-found"
+            print(
+                f"[ERROR] Required Trivy report not found: {args.trivy_report}",
+                file=sys.stderr,
+                flush=True,
             )
         else:
             coverage_reason = "trivy-report-not-found"
@@ -575,7 +594,7 @@ def main():
             cleanup_container_name=baseline_container,
         )
 
-        if candidate_count:
+        if trivy_targeting_enabled and candidate_count:
             print("[INFO] Listing matching Nuclei templates", flush=True)
             list_container = unique_container_name("template-list")
             list_command = docker_nuclei_command(
@@ -625,15 +644,16 @@ def main():
                     suppress_stdout=True,
                     cleanup_container_name=targeted_container,
                 )
-                coverage_status = "completed"
-                coverage_reason = "matching-templates-executed"
+                if not required_trivy_missing:
+                    coverage_status = "completed"
+                    coverage_reason = "matching-templates-executed"
             else:
                 coverage_reason = "no-matching-nuclei-template"
                 print(
                     "[INFO] CVE-targeted scan skipped: no matching template",
                     flush=True,
                 )
-        else:
+        elif trivy_targeting_enabled and not required_trivy_missing:
             print(
                 "[INFO] CVE-targeted scan skipped: no High/Critical CVE",
                 flush=True,
@@ -658,6 +678,13 @@ def main():
                 "combined_findings": baseline_findings + targeted_findings,
             },
         )
+        if required_trivy_missing:
+            print(
+                "[ERROR] Nuclei base scan completed, but required Trivy CVE "
+                "input was unavailable.",
+                file=sys.stderr,
+            )
+            return 2
     except (NucleiExecutionError, ValueError) as error:
         combine_jsonl([baseline_path, targeted_path], combined_path)
         write_coverage_report(

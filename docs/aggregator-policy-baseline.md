@@ -54,7 +54,7 @@ Aggregator는 결과를 모으고, 최종 Block/Pass는 Policy Evaluator가 결�
 서비스 장애나 명확한 대형 보안 이슈만 막는다.
 
 - Secret 노출
-- Critical / High 중 실제로 위험한 것  
+- Critical / High 중 실제로 위험한 것
   예: RCE, 인증 우회, XSS/SQLi 실탐지, 심각한 의존성 CVE
 - Health / Smoke 실패처럼 서비스가 안 뜨는 상태
 - 스캐너가 아예 실패해서 결과를 신뢰할 수 없는 경우 (Fail Closed 최소선)
@@ -108,15 +108,15 @@ Aggregator는 결과를 모으고, 최종 Block/Pass는 Policy Evaluator가 결�
 
 엄격함을 줄이려면 Block 목록만 줄이지 말고, 예외를 명시적으로 관리한다.
 
-1. 기본은 Fail Closed  
+1. 기본은 Fail Closed
    결과 없음 / 도구 고장 → 막음
-2. 다만 아래는 예외 가능  
-   - 확인된 오탐  
-   - Accepted Risk (기한 있음)  
+2. 다만 아래는 예외 가능
+   - 확인된 오탐
+   - Accepted Risk (기한 있음)
    - 아직 수정 중인 알려진 이슈
-3. 예외는 “무시”가 아니라 아래를 남긴다  
-   - 왜 예외인지  
-   - 누가 승인했는지  
+3. 예외는 “무시”가 아니라 아래를 남긴다
+   - 왜 예외인지
+   - 누가 승인했는지
    - 언제 만료되는지
 
 ## 6. 입력 보고서
@@ -157,7 +157,7 @@ Post-merge에서는 CycloneDX SBOM 업로드 성공을 필수로 본다.
 }
 ```
 
-향후 고도화 시 아래 필드를 추가할 수 있다.
+현재 공통 스키마는 아래 분류 필드를 사용한다.
 
 - `category`: `vuln` | `misconfig` | `secret` | `availability` | `scanner-error`
 - `remediation`: 권고 문구 (자동 수정 가이드 생성은 별도 AI 담당, 본 기준선 범위 밖)
@@ -167,22 +167,14 @@ Post-merge에서는 CycloneDX SBOM 업로드 성공을 필수로 본다.
 `scripts/gate_policy.py`가 finding `category`를 분류하고,
 `evaluate-gate.py`가 아래 정책 파일로 Block/Warn을 판단한다.
 
-```json
-{
-  "blockOnSecret": true,
-  "blockOnScannerError": true,
-  "blockOnAvailability": true,
-  "blockOnAvailabilityMedium": false,
-  "blockOnVulnCritical": true,
-  "blockOnVulnHigh": true,
-  "warnOnMedium": true,
-  "warnOnMisconfig": true,
-  "cveTrack": {
-    "enabled": "monitor",
-    "adjustment": { "annotateOnly": true }
-  }
-}
-```
+정책 파일은 Policy v2이며 `pr`, `post_merge`, `training` 프로필마다
+`blockOnSecret`, `blockOnScannerError`, `blockOnAvailability`,
+`blockOnVulnCritical`, `blockOnVulnHigh`, `warnOnMedium`,
+`warnOnMisconfig`을 설정한다. PR과 Post-merge는 차단 기준이 같고,
+교육용 `training`만 고위험 vuln와 가용성 문제를 Warn으로 낮춘다.
+프로필과 별도로 최상위 `cveTrack`이 dependency CVE 보정 방식을
+설정한다. 현재 기본값은 `monitor`와 `annotateOnly=true`이므로
+CVE 근거를 기록하되 기존 Gate 판정은 바꾸지 않는다.
 
 | 항목 | 현재 코드 | 상태 |
 | --- | --- | --- |
@@ -193,9 +185,10 @@ Post-merge에서는 CycloneDX SBOM 업로드 성공을 필수로 본다.
 | dependency CVE 보정 | `cve_track` promote/demote (기본 monitor + annotateOnly) | 반영 |
 | Trivy `purl` / `fixedVersion` | aggregator 정규화 | 반영 |
 | PR vs Post-merge 차단 기준 | 동일 | 유지 |
-| 예외 승인 | `security/policies/suppressions.json` | 기본 골격 반영 |
+| 예외 승인 | `security/policies/suppressions.json` | 검증 및 판정 반영 |
+| AI 설명 | `generate-ai-security-summary.py` | Gate 이후 비차단 설명으로 반영 |
 | AI 보고서 참고 | `docs/AI-reference.md` | 반영 |
-| IR 플레이북 | `docs/incident-response-playbook.md` | 반영 |
+| IR 플레이북 | `docs/IR-playbook.md` | 반영 |
 | ZAP XSS 탐지 고도화 | 별도 DAST 과제 | 보류 |
 
 CVE 트랙은 category 판정 **이후** dependency(`CVE-*`) finding만 보정한다.
@@ -212,6 +205,7 @@ CVE 트랙은 category 판정 **이후** dependency(`CVE-*`) finding만 보정�
       "id": "CVE-2020-1747",
       "location_contains": "requirements-legacy.txt:PyYAML",
       "reason": "accepted lab fixture",
+      "owner": "security-team",
       "approved_by": "policy-owner",
       "expires_on": "2026-12-31"
     }
@@ -261,10 +255,13 @@ Fail Closed 최소선은 유지한다.
 - Gate: `FAILED`
 - 이유: 기술 실패 (Fail Closed)
 
-## 11. 계획에서 제외 / 보류
+## 11. 비차단 AI 설명
 
-- E 파트 자동 수정 가이드 생성: 계획에서 제외  
-  다른 담당자가 AI 결과 보고서를 별도로 구성한다.
+- AI는 `gate-decision.json`의 확정 결과를 요약하고 개선 방향을 제안한다.
+- AI API 실패나 미설정은 Gate 상태를 변경하지 않는다.
+- PR과 Post-merge Workflow 모두 AI JSON/Markdown을 Gate Artifact에 포함한다.
+- PR 댓글은 AI JSON의 상태가 `succeeded`일 때 요약과 우선 개선 방향을 표시한다.
+- 자동 코드 수정은 범위에서 제외한다.
 - ZAP 탐지 고도화(예: Reflected/Stored XSS 커버리지): DAST 고도화 항목으로 별도 진행
 - Discord 요약 알림: Post-merge hard gate 요약 webhook (`docs/discord-notification.md`)
 - Telegram 알림: 범위 제외 (Discord 한정)

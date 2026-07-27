@@ -157,7 +157,9 @@ jobs:
 | `app_port` | `3000` | runner-local 포트 |
 | `health_path` | `/health` | readiness 경로 |
 | `target_url` | `""` | 외부 Preview/Staging URL (있으면 localhost 대신 사용) |
+| `dast_scan_path` | `/` | PR DAST 시작 경로. Base URL과 분리하며 취약 앱은 `/posts`처럼 지정 |
 | `policy_path` | `""` | caller 정책 경로 (비어 있으면 기본/로컬 정책) |
+| `gate_profile` | `pr` | 정책 프로필. 일반 PR은 `pr`, 의도적으로 취약한 교육용 앱은 `training` 사용 |
 | `node_version` | `20` | Node 기반 install/build/start 시 사용 |
 | `dockerfile_path` | `""` | Dockerfile 경로. 비어 있으면 루트 `Dockerfile` → `dockerfile`만 자동 탐색 (하위 경로 자동 선택 안 함) |
 | `docker_build_context` | `"."` | Docker build context. 모노레포는 caller가 명시 |
@@ -175,6 +177,9 @@ jobs:
 | `DEPENDENCY_TRACK_URL` | Post-merge 필수 | Dependency-Track **Backend API** base URL (UI 전용 주소 아님) |
 | `DEPENDENCY_TRACK_API_KEY` | Post-merge 필수 | Dependency-Track API Key |
 | `DYNATRACE_TOKEN` | Post-merge 필수 | Post-merge Reusable Workflow에서 Problems와 Service entities 조회 |
+| `ZAP_AUTH_PASSWORD` | 인증 ZAP 사용 시 필수 | ZAP Automation Framework 테스트 계정 비밀번호 |
+| `CUSTOM_RUNTIME_PASSWORD` | 인증 Custom Check 사용 시 필수 | Admin/IDOR 검사 테스트 계정 비밀번호 |
+| `OPENAI_API_KEY` | 선택 | Gate 판정 이후 비차단 AI 설명 보고서 생성. 미등록·API 실패 시 `skipped`/`failed` 보고서만 생성 |
 
 PR에서는 Dependency-Track 업로드를 생략한다. Post-merge에서는 URL/API Key와
 SBOM 업로드 성공을 필수로 요구하며 실패 또는 skip 시 Gate를 차단한다.
@@ -324,6 +329,8 @@ security/reports/
   runtime-report.json       # Runtime Validation 결과 (D파트)
   security-summary.json     # Aggregator 통합 결과
   gate-decision.json        # Gate Evaluator 판단 결과
+  ai-security-summary.json  # AI 설명 구조화 결과 (비차단)
+  ai-security-summary.md    # 사람이 읽는 AI 설명 보고서 (비차단)
 ```
 
 ---
@@ -357,19 +364,22 @@ security/reports/
 
 | 조건 | 처리 |
 | --- | --- |
-| Critical 탐지 | Merge 차단 |
-| High 탐지 | Merge 차단 |
-| Secret 탐지 | Merge 차단 |
-| Medium 탐지 | PR 댓글 경고 |
-| 모두 통과 | Merge 허용 |
+| 실제 Critical/High `vuln` | 차단 |
+| Secret, 스캐너 기술 실패 | 차단 |
+| High/Critical 가용성 실패 | 차단 |
+| Medium 또는 `misconfig` | 경고 |
+| 승인·소유자·사유·만료일이 유효한 예외 | 판정 제외, 기록 유지 |
+| 모두 통과 | 허용 |
 
 환경변수 `SECURE_GATE_POLICY`로 정책 파일 경로를 오버라이드할 수 있다.
+`SECURE_GATE_PROFILE` 또는 `evaluate-gate.py --profile`로 `pr`,
+`post_merge`, `training` 프로필을 선택한다.
 
 ---
 
 ## Merge 차단 메커니즘
 
-1. `evaluate-gate.py`가 Critical/High/Secret 탐지 시 `exit 1`
+1. `evaluate-gate.py`가 선택 프로필의 Block 조건 탐지 시 `exit 1`
 2. `aggregate-and-gate` Job 실패 → GitHub Check 실패
 3. Branch Protection Rule에서 해당 Check를 Required로 설정 → Merge 버튼 비활성화
 
@@ -383,6 +393,8 @@ security/reports/
 | --- | --- |
 | `scripts/aggregate-results.py` | 각 보안 결과 파일 통합 |
 | `scripts/evaluate-gate.py` | 정책 기준 Pass/Fail 판단 |
+| `scripts/gate_policy.py` | finding 카테고리 분류와 Block/Warn 공통 규칙 |
+| `scripts/generate-ai-security-summary.py` | 확정 Gate 결과의 비차단 AI 요약과 개선 방향 생성 |
 | `scripts/create-pr-comment.py` | GitHub API로 PR 댓글 작성 |
 | `scripts/runtime-validation.py` | Health / Smoke / Header / Custom Check / ZAP / Nuclei / Dynatrace 결과를 `runtime-report.json`으로 생성하고, Post-merge 필수 원본 결과 누락을 검증 |
 | `scripts/fetch-dynatrace-problems.py` | Dynatrace Problems API v2의 열린 문제와 최근 Service entities를 JSON으로 수집 |

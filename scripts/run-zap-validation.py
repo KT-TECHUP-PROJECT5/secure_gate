@@ -139,16 +139,53 @@ def cleanup_container(container_name):
         pass
 
 
-def build_zap_command(args, reports_dir, container_name):
+def build_zap_command(args, reports_dir, container_name, auth_plan_path=None):
     command = ["docker", "run", "--rm", "--name", container_name]
     if not is_disabled(args.docker_network):
         command.extend(["--network", args.docker_network])
+
+    if auth_plan_path:
+        command.extend(
+            [
+                "-e",
+                "ZAP_TARGET_URL",
+                "-e",
+                "ZAP_CONTEXT_URL",
+                "-e",
+                "ZAP_AUTH_USERNAME",
+                "-e",
+                "ZAP_AUTH_PASSWORD",
+            ]
+        )
 
     command.extend(
         [
             "-v",
             f"{reports_dir.resolve()}:/zap/wrk:rw",
-            args.zap_image,
+        ]
+    )
+    if auth_plan_path:
+        command.extend(
+            [
+                "-v",
+                f"{auth_plan_path.resolve()}:/zap/auth-plan.yaml:ro",
+            ]
+        )
+    command.append(args.zap_image)
+
+    if auth_plan_path:
+        command.extend(
+            [
+                "zap.sh",
+                "-cmd",
+                "-autorun",
+                "/zap/auth-plan.yaml",
+            ]
+        )
+        return command
+
+    command.extend(
+        [
             args.scanner,
             "-t",
             args.target_url,
@@ -164,12 +201,22 @@ def build_zap_command(args, reports_dir, container_name):
     return command
 
 
-def run_zap(command, timeout_seconds, container_name):
+def run_zap(
+    command,
+    timeout_seconds,
+    container_name,
+    allowed_exit_codes=None,
+    environment=None,
+):
+    if allowed_exit_codes is None:
+        allowed_exit_codes = FINDING_EXIT_CODES
+
     try:
         result = subprocess.run(
             command,
             check=False,
             timeout=timeout_seconds,
+            env=environment,
         )
     except FileNotFoundError as error:
         raise ZapExecutionError("Docker command was not found") from error
@@ -181,11 +228,53 @@ def run_zap(command, timeout_seconds, container_name):
     except OSError as error:
         raise ZapExecutionError(f"Could not execute Docker: {error}") from error
 
-    if result.returncode not in FINDING_EXIT_CODES:
+    if result.returncode not in allowed_exit_codes:
         raise ZapExecutionError(
             f"ZAP scanner failed with exit code {result.returncode}"
         )
     return result.returncode
+
+
+def resolve_auth_context_url(target_url, configured_context_url):
+    context_url = str(configured_context_url or "").strip()
+    if context_url:
+        validate_target_url(context_url)
+        return context_url.rstrip("/")
+
+    parsed = urlparse(target_url)
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def validate_auth_configuration(args):
+    if not args.auth_plan:
+        return
+
+    if not args.auth_plan.is_file():
+        raise ValueError(f"ZAP authentication plan not found: {args.auth_plan}")
+    if not args.auth_username.strip():
+        raise ValueError(
+            "ZAP authenticated scan requires ZAP_AUTH_USERNAME or --auth-username"
+        )
+    if not args.auth_password:
+        raise ValueError(
+            "ZAP authenticated scan requires ZAP_AUTH_PASSWORD or --auth-password"
+        )
+
+
+def build_zap_environment(args):
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "ZAP_TARGET_URL": args.target_url,
+            "ZAP_CONTEXT_URL": resolve_auth_context_url(
+                args.target_url,
+                args.auth_context_url,
+            ),
+            "ZAP_AUTH_USERNAME": args.auth_username,
+            "ZAP_AUTH_PASSWORD": args.auth_password,
+        }
+    )
+    return environment
 
 
 def validate_report(report_path):
@@ -249,6 +338,30 @@ def parse_args():
         type=parse_duration,
         default=os.environ.get("ZAP_SCAN_TIMEOUT"),
     )
+    auth_plan_default = os.environ.get("ZAP_AUTH_PLAN", "").strip()
+    parser.add_argument(
+        "--auth-plan",
+        type=Path,
+        default=Path(auth_plan_default) if auth_plan_default else None,
+        help=(
+            "Optional ZAP Automation Framework plan. When set, the plan must "
+            "write /zap/wrk/zap-report.json."
+        ),
+    )
+    parser.add_argument(
+        "--auth-context-url",
+        default=os.environ.get("ZAP_AUTH_CONTEXT_URL", ""),
+        help="Top-level application URL used as the authenticated ZAP context.",
+    )
+    parser.add_argument(
+        "--auth-username",
+        default=os.environ.get("ZAP_AUTH_USERNAME", ""),
+    )
+    parser.add_argument(
+        "--auth-password",
+        default=os.environ.get("ZAP_AUTH_PASSWORD", ""),
+        help="Prefer the ZAP_AUTH_PASSWORD environment variable in CI.",
+    )
     ajax_group = parser.add_mutually_exclusive_group()
     ajax_group.add_argument(
         "--ajax-spider",
@@ -278,13 +391,39 @@ def main():
         report_path = reports_dir / "zap-report.json"
         report_path.unlink(missing_ok=True)
         validate_target_url(args.target_url)
+        validate_auth_configuration(args)
         container_name = unique_container_name()
-        command = build_zap_command(args, reports_dir, container_name)
-        print(
-            f"[INFO] Running ZAP {args.profile} profile with {args.scanner}",
-            flush=True,
+        auth_plan_path = None
+        environment = None
+        allowed_exit_codes = FINDING_EXIT_CODES
+
+        if args.auth_plan:
+            auth_plan_path = args.auth_plan
+            environment = build_zap_environment(args)
+            allowed_exit_codes = {0}
+            print(
+                "[INFO] Running authenticated ZAP Automation Framework plan",
+                flush=True,
+            )
+        else:
+            print(
+                f"[INFO] Running ZAP {args.profile} profile with {args.scanner}",
+                flush=True,
+            )
+
+        command = build_zap_command(
+            args,
+            reports_dir,
+            container_name,
+            auth_plan_path=auth_plan_path,
         )
-        zap_exit_code = run_zap(command, args.scan_timeout, container_name)
+        zap_exit_code = run_zap(
+            command,
+            args.scan_timeout,
+            container_name,
+            allowed_exit_codes=allowed_exit_codes,
+            environment=environment,
+        )
         validate_report(report_path)
     except (ValueError, ZapExecutionError) as error:
         print(f"[ERROR] {error}", file=sys.stderr)

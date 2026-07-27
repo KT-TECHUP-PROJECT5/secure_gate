@@ -1,8 +1,8 @@
 ---
 문서명: D파트 Runtime Validation 작업 체크리스트
-최신화: 2026-07-24
+최신화: 2026-07-26
 작성자: D파트
-Version: 1.12.0
+Version: 1.13.0
 ---
 
 # D파트 Runtime Validation 작업 체크리스트
@@ -22,6 +22,9 @@ D파트는 실행 중인 테스트/Staging 환경을 대상으로 런타임 보�
 - [x] Custom Runtime Check 구현
 - [x] OWASP ZAP JSON 결과 파싱 구현
 - [x] ZAP `pr` Baseline / `post-merge` Full Scan 실행기 구현: `scripts/run-zap-validation.py`
+- [x] ZAP form login, cookie session, 인증 User Spider/Active Scan Plan 구현
+- [x] ZAP 인증정보를 Docker 명령에 노출하지 않는 환경변수 전달 구현
+- [x] Custom Runtime Check 로그인 성공 검증과 인증 실패 High finding 구현
 - [x] Nuclei JSONL 결과 파싱 구현
 - [x] Trivy High/Critical CVE를 Nuclei template ID 입력으로 변환하는 스크립트 구현
 - [x] Nuclei `-tl` 기반 CVE 템플릿 사전 확인 및 템플릿 0개 처리 기준 작성
@@ -53,15 +56,15 @@ D파트는 실행 중인 테스트/Staging 환경을 대상으로 런타임 보�
 - [x] Smoke Test 대상 경로와 기대 상태 확정: `/login=200,/posts=200,/upload=200|303,/docs=200,/redoc=200`
 - [ ] 필수 보안 헤더 목록 확정
 - [ ] 인증이 필요한 Smoke Test 처리 방식 확정
-- [ ] ZAP 인증 스캔 필요 여부 확정
+- [x] ZAP 인증 스캔 필요 여부 확정
 - [x] Merge 이후 Nuclei 기본 범위 확정: 태그 제한 없음, `low,medium,high,critical`, 전체 timeout 30분
 - [ ] Nuclei OAST, Headless, Fuzzing 별도 정밀 검사 사용 여부 확정
 - [x] C파트 Trivy 원본 JSON 경로 확정: `security/reports/dependency-report.json`
-- [ ] A파트의 `dependency-report` Artifact 다운로드와 D파트 Job 연결 확인
+- [x] A파트의 `dependency-report` Artifact 다운로드와 D파트 Job 연결 확인
 - [ ] A파트의 PR ZAP 직접 Docker 명령을 `run-zap-validation.py --profile pr`로 교체
-- [ ] A파트의 `run-nuclei-validation.py` 실행 step 연결 확인
+- [x] A파트의 `run-nuclei-validation.py` 실행 step 연결 확인
 - [ ] A파트의 임시 `runtime-report.json` 직접 작성을 `runtime-validation.py` 실행으로 교체
-- [ ] Trivy High/Critical finding이 Nuclei 결과와 관계없이 Aggregator에 유지되는지 확인
+- [x] Trivy High/Critical finding이 Nuclei 결과와 관계없이 Aggregator에 유지되는지 확인
 - [x] 기존 ECS Service가 OneAgent 없는 `secure-gate-dast:1`을 사용한 상태 확인
 - [x] ECS Fargate OneAgent application-only 연동 방식 확정
 - [x] OneAgent 설정이 포함된 `secure-gate-dast:4` 등록 확인
@@ -79,6 +82,7 @@ D파트는 실행 중인 테스트/Staging 환경을 대상으로 런타임 보�
 - [x] A파트의 Dynatrace Repository Variable/Secret 및 실행 step 연결
 - [x] A파트의 CD Placeholder를 ZAP/Nuclei `post-merge` 프로필과 Dynatrace 수집 순서로 교체
 - [x] A파트 Workflow YAML 연결
+- [x] A파트의 Post-merge ZAP Step에 인증 Plan과 `ZAP_AUTH_PASSWORD` Secret 연결
 
 ---
 
@@ -98,7 +102,7 @@ D파트는 실행 중인 테스트/Staging 환경을 대상으로 런타임 보�
 | `NUCLEI_TEMPLATE_LIST_TIMEOUT` | `2m` |
 | `NUCLEI_TEMPLATE_VOLUME` | `secure-gate-nuclei-templates` |
 | Merge 이후 ZAP | `run-zap-validation.py --profile post-merge`, Spider 5분, Ajax Spider 포함, 전체 timeout 30분 |
-| Merge 이후 Nuclei | `--profile post-merge`, 태그 제한 없음, `low,medium,high,critical`, `rate-limit=20`, `c=10`, 전체 timeout 30분 |
+| Merge 이후 Nuclei | `--profile post-merge`, Trivy 입력 비활성화, 태그 제한 없음, `low,medium,high,critical`, `rate-limit=20`, `c=10`, 전체 timeout 30분 |
 | `RUNTIME_BASE_URL` | PR 임시 환경: `http://127.0.0.1:8000` |
 | `STAGING_URL` | 공용 Staging: `http://www.securegate.n-e.kr` |
 | Staging 실행 환경 | ECS Cluster/Service `secure-gate-dast`, Launch Type `FARGATE` |
@@ -112,7 +116,13 @@ D파트는 실행 중인 테스트/Staging 환경을 대상으로 런타임 보�
 | `CUSTOM_RUNTIME_USERNAME` | `user1` |
 | `CUSTOM_RUNTIME_PASSWORD` | `password123` |
 | `CUSTOM_RUNTIME_PRIVATE_POST_ID` | `4` |
+| `CUSTOM_RUNTIME_LOGIN_VERIFY_PATH` | `/posts` |
+| `CUSTOM_RUNTIME_LOGGED_IN_MARKERS` | `로그아웃,/logout` |
 | `CUSTOM_RUNTIME_SQLI_PAYLOAD` | `') OR '1'='1' --` |
+| `ZAP_AUTH_PLAN` | `security/zap/secure-gate-auth-plan.yaml` |
+| `ZAP_AUTH_CONTEXT_URL` | `http://www.securegate.n-e.kr` |
+| `ZAP_AUTH_USERNAME` | `user1` |
+| `ZAP_AUTH_PASSWORD` | GitHub Actions Secret으로만 주입 |
 | `ZAP_REPORT_PATH` | `security/reports/zap-report.json` |
 | `ZAP_SCAN_PROFILE` | PR: `pr`, Merge 이후: `post-merge` |
 | `NUCLEI_REPORT_PATH` | `security/reports/nuclei-report.jsonl` |
@@ -146,11 +156,13 @@ D파트는 실행 중인 PR 임시 환경 또는 Staging URL을 검사하는 명
 - Health Check Endpoint
 - Smoke Test 실행 경로
 - ZAP 실행 명령어와 결과 파일 경로
+- Merge 이후 인증 ZAP Plan 경로, Context URL, 테스트 계정 Variable/Secret 매핑
+- 인증 실패 또는 로그인 성공 표시 미확인 시 스캐너 실패로 처리하는 기준
 - ZAP 실행은 `run-zap-validation.py`를 사용하고 `|| true` / `continue-on-error`로 스캐너 오류를 숨기지 않는 기준
 - Nuclei 실행 명령어와 결과 파일 경로
 - Merge 이후 ZAP Full Scan과 Nuclei 광범위 스캔의 순차 실행 명령어
 - Post-deploy 실패 시 Production 승격 차단 또는 rollback 연결 기준
-- Trivy `dependency-report` Artifact 다운로드 후 `scripts/run-nuclei-validation.py` 실행 명령어
+- PR 단계 Trivy `dependency-report` Artifact 다운로드 후 `scripts/run-nuclei-validation.py` 실행 명령어
 - Nuclei `-tl` 템플릿 사전 확인, 템플릿 0개 시 `skipped` 처리 기준
 - Trivy finding을 Nuclei 탐지 여부와 관계없이 Aggregator에 유지하는 기준
 - Dynatrace Environment URL, selector, Secret 이름과 Problems API 수집 명령어

@@ -55,7 +55,6 @@ REPORT_FILES = {
     "runtime_validation": "runtime-report.json",
 }
 
-
 def select_report_files(raw_value: str) -> dict[str, str]:
     if not raw_value.strip():
         return dict(REPORT_FILES)
@@ -277,6 +276,7 @@ def normalize_common_report(data: dict) -> dict:
         "tool": data.get("tool") or "unknown",
         "findings": findings,
         "errors": data.get("errors") or [],
+        "warnings": data.get("warnings") or [],
     }
 
 
@@ -289,9 +289,14 @@ def normalize_report(key: str, data: object) -> dict:
         key == "dependency_scan"
         and isinstance(data, dict)
         and data.get("SchemaVersion") == 2
-        and isinstance(data.get("Results"), list)
     ):
-        return normalize_trivy(data)
+        results = data.get("Results")
+        if results is None:
+            normalized_data = dict(data)
+            normalized_data["Results"] = []
+            return normalize_trivy(normalized_data)
+        if isinstance(results, list):
+            return normalize_trivy(data)
     if key == "dependency_track" and isinstance(data, dict):
         return normalize_dependency_track(data)
     if isinstance(data, dict) and isinstance(data.get("findings"), list):
@@ -325,7 +330,8 @@ def main():
         default=os.environ.get("SECURE_GATE_REPORTS", ""),
         help=(
             "Comma-separated report keys to require. "
-            "Default: build,sast,secret_scan,dependency_scan,runtime_validation"
+            "Default: build,sast,secret_scan,dependency_scan,"
+            "dependency_track,runtime_validation"
         ),
     )
     args = parser.parse_args()

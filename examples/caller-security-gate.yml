@@ -34,10 +34,12 @@ jobs:
       # start_command: npm start
       # app_port: "3000"
       # health_path: /health
+      # dast_scan_path: /
       # node_version: "20"
       # --- 또는 이미 떠 있는 Preview/Staging URL ---
       # enable_dast: true
       # target_url: https://staging.example.com
+      # dast_scan_path: /posts
       # --- 정책 오버라이드 (없으면 Secure Gate 기본 정책 사용) ---
       # policy_path: security/policies/security-gate-policy.json
       # --- Trivy image 분기 (모노레포는 경로를 명시) ---
@@ -52,5 +54,6 @@ jobs:
     secrets:
       DEPENDENCY_TRACK_URL: ${{ secrets.DEPENDENCY_TRACK_URL }}
       DEPENDENCY_TRACK_API_KEY: ${{ secrets.DEPENDENCY_TRACK_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       # Optional soft-gate Discord summary; 결과 리포트 링크는 PR 페이지
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}

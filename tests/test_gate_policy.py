@@ -66,6 +66,17 @@ class GatePolicyClassificationTests(unittest.TestCase):
         self.assertEqual("vuln", xss)
         self.assertEqual("vuln", cve)
 
+    def test_zap_xss_is_not_downgraded_by_csp_remediation_text(self):
+        finding = {
+            "id": "runtime.zap.40012",
+            "severity": "high",
+            "title": "Cross Site Scripting (Reflected)",
+            "description": "Use output encoding and a Content Security Policy.",
+        }
+
+        self.assertEqual("vuln", gate_policy.infer_category(finding))
+        self.assertTrue(gate_policy.should_block_finding(finding, POLICY))
+
     def test_misconfig_warns_but_does_not_block(self):
         finding = {
             "id": "runtime.zap.10106",
@@ -173,6 +184,7 @@ class EvaluateGatePolicyTests(unittest.TestCase):
                     "id": "CVE-2020-1747",
                     "location_contains": "requirements-legacy.txt:PyYAML",
                     "reason": "lab fixture accepted risk",
+                    "owner": "security-team",
                     "approved_by": "policy-owner",
                     "expires_on": "2099-01-01",
                 }

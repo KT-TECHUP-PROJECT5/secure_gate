@@ -7,7 +7,7 @@ Version: 0.1.0
 
 # Discord 게이트 요약 알림
 
-Soft(PR) / Hard(post-merge) Gate 결과를 Discord Incoming Webhook으로 요약 전송한다.  
+Soft(PR) / Hard(post-merge) Gate 결과를 Discord Incoming Webhook으로 요약 전송한다.
 Telegram은 범위에서 제외한다.
 
 | 모드 | Discord | 결과 리포트 링크 |
@@ -84,6 +84,6 @@ python3 scripts/notify-discord.py --decision security/reports/gate-decision.json
 
 ## 관련 문서
 
-- `docs/incident-response-playbook.md` — 알림 이후 사람 대응
+- `docs/IR-playbook.md` — 알림 이후 사람 대응
 - `docs/AI-reference.md` — AI 상세 보고서는 별도 채널
 - `docs/aggregator-policy-baseline.md` — Block/Warn 기준

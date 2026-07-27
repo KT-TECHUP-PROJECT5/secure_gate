@@ -1,8 +1,8 @@
 ---
 문서명: Runtime Validation 가이드
-최신화: 2026-07-24
+최신화: 2026-07-26
 작성자: D파트
-Version: 1.9.0
+Version: 1.10.0
 ---
 
 # Runtime Validation Guide
@@ -34,7 +34,7 @@ scripts/runtime-validation.py
 
 ## A파트 전달 사항
 
-D파트는 Workflow YAML을 직접 수정하지 않고, 아래 실행 방식과 명령어, 결과 파일 기준을 A파트에 전달한다. A파트는 이 내용을 PR Workflow의 Runtime Validation Job에 등록하고 임시 실행 환경의 시작과 종료를 담당한다.
+D파트 실행기는 Reusable Workflow의 Runtime Validation Job에 연결되어 있다. A파트는 Caller Workflow에서 대상 URL, 실행 경로, Repository Variables/Secrets를 전달하고 임시 실행 환경의 시작과 종료를 담당한다.
 
 | 전달 항목 | D파트 전달 내용 |
 | --- | --- |
@@ -43,26 +43,65 @@ D파트는 Workflow YAML을 직접 수정하지 않고, 아래 실행 방식과 
 | Health Check Endpoint | `GET /posts`, 기대 상태 코드 `200`. 이 앱은 전용 `/health`가 없으므로 `/posts`를 대체 경로로 사용한다. `HEAD /posts`는 `405`이므로 GET 요청으로 검사한다. |
 | Smoke Test 실행 명령어 | `RUNTIME_BASE_URL=http://127.0.0.1:8000 HEALTH_CHECK_PATH=/posts HEALTH_EXPECTED_STATUS=200 SMOKE_TEST_PATHS="/login=200,/posts=200,/upload=200\|303,/docs=200,/redoc=200" python3 scripts/runtime-validation.py` |
 | PR ZAP 실행 명령어 | `python3 scripts/run-zap-validation.py --profile pr --target-url http://127.0.0.1:8000/posts` |
-| Merge 이후 ZAP 실행 명령어 | `python3 scripts/run-zap-validation.py --profile post-merge --target-url "${STAGING_URL}/posts"` |
+| Merge 이후 ZAP 실행 명령어 | `ZAP_AUTH_USERNAME=user1 ZAP_AUTH_PASSWORD="<Secret>" python3 scripts/run-zap-validation.py --profile post-merge --target-url "${STAGING_URL}/posts" --auth-context-url "${STAGING_URL}" --auth-plan security/zap/secure-gate-auth-plan.yaml` |
+| ZAP 인증 검사 기준 | `security/zap/secure-gate-auth-plan.yaml`이 form login, cookie session, 로그인 상태 검증, 인증 User Spider와 Active Scan을 실행한다. Spider는 `ZAP_TARGET_URL`에서 시작하고 Context는 Base URL 하위 경로를 포함하므로 루트 `/`가 404인 앱도 검사할 수 있다. 비밀번호는 파일이나 명령문에 저장하지 않고 Secret에서 `ZAP_AUTH_PASSWORD`로 주입한다. |
 | ZAP 결과 파일 경로 | `security/reports/zap-report.json` |
 | PR Nuclei 실행 명령어 | `python3 scripts/run-nuclei-validation.py --profile pr --target-url http://127.0.0.1:8000/posts --trivy-report security/reports/dependency-report.json`. PR 기본값은 `medium,high,critical`, `xss`, 전체 timeout 5분이다. |
-| Merge 이후 Nuclei 실행 명령어 | `python3 scripts/run-nuclei-validation.py --profile post-merge --target-url "${STAGING_URL}/posts" --reports-dir security/reports`. 태그 제한 없이 `low,medium,high,critical`, 전체 timeout 30분이다. |
+| Merge 이후 Nuclei 실행 명령어 | `python3 scripts/run-nuclei-validation.py --profile post-merge --target-url "${STAGING_URL}/posts" --reports-dir security/reports`. Trivy 입력 없이 태그 제한 없는 `low,medium,high,critical` Full Scan을 실행하며 전체 timeout은 30분이다. |
 | Nuclei 결과 파일 경로 | 통합 finding은 `security/reports/nuclei-report.jsonl`, CVE 검사 수행 상태는 `security/reports/nuclei-cve-coverage.json` |
-| Trivy CVE 연동 | C파트 `dependency-scan` Job이 생성한 원본 `security/reports/dependency-report.json` Artifact를 A파트가 다운로드한다. `run-nuclei-validation.py`가 High/Critical CVE 추출, 템플릿 사전 확인, 조건부 검사와 결과 통합을 수행한다. |
+| Trivy CVE 연동 | PR 또는 선택 실행에서 C파트 `dependency-report.json` Artifact를 전달하면 High/Critical CVE 추출, 템플릿 사전 확인, 조건부 검사와 결과 통합을 수행한다. Post-merge Full Scan에서는 Dependency/Runtime 병렬 실행을 위해 Trivy 입력을 사용하지 않는다. |
 | Dynatrace 실행 방식 | ECS Service는 OneAgent Code Module이 포함된 `secure-gate-dast:4`를 실행 중이다. Python Agent가 Uvicorn 프로세스에 로드되고 Dynatrace endpoint에 연결된 것까지 확인했다. `fetch-dynatrace-problems.py`가 Problems와 최근 `SERVICE` 엔티티를 함께 조회한다. |
 | Dynatrace 설정값 | Environment URL은 `https://xlj20734.live.dynatrace.com`, Problem selector는 `status("open")`, Problems/Service entity selector는 `type("SERVICE"),entityName.equals("OWASP practice board DAST")`이다. ECS 설치용 PaaS Token과 조회용 `problems.read` + `entities.read` 토큰은 분리한다. |
 | Dynatrace 결과 파일 경로 | `security/reports/dynatrace-problems.json`에 `problems`와 `serviceCoverage`가 함께 저장되고, 공통 스키마 통합 결과는 `security/reports/runtime-report.json`이다. |
 | 보안 헤더 검증 기준 | HTTP: `x-content-type-options`, `x-frame-options`, `content-security-policy`. HTTPS에서는 `strict-transport-security`를 자동으로 추가한다. |
-| Custom Runtime Check | 스크립트 직접 실행 기본값은 `debug-exposure`, `docs-exposure`, `reflected-xss`, `search-sqli`, `admin-access`, `idor`다. 범용 Post-merge Reusable Workflow는 애플리케이션별 인증정보 오용을 막기 위해 기본값을 `none`으로 둔다. |
+| Custom Runtime Check | 스크립트 직접 실행 기본값은 `debug-exposure`, `docs-exposure`, `reflected-xss`, `search-sqli`, `admin-access`, `idor`다. 인증 검사는 로그인 후 `/posts` 응답의 `로그아웃` 또는 `/logout` 표시를 확인하고, 실패하면 High `runtime.custom.authentication.failed`를 생성한다. |
 | Runtime Validation 실패 기준 | Critical/High/Secret finding이 하나라도 있으면 `failed`, Medium/Low만 있으면 `warning`, finding이 없으면 `passed`. PR의 Merge 차단과 배포 후 승격 차단은 E파트 Policy Evaluator가 결정한다. |
 
 ZAP, Nuclei, Dynatrace 원본 결과는 각각 중간 입력으로 보존한다. 이를 공통 finding으로 변환한 D파트 최종 결과는 `security/reports/runtime-report.json`이다.
+
+### A파트 인증 ZAP 연결 현황
+
+Post-merge Reusable Workflow에는 인증 ZAP Plan, Custom Runtime 계정, Base URL과 Scan Path 분리가 연결되어 있다. A파트는 Caller 저장소에 아래 Variable/Secret을 등록하고 Reusable Workflow에 전달해야 한다.
+
+| 구분 | 전달값 |
+| --- | --- |
+| 인증 Plan | `.secure-gate/security/zap/secure-gate-auth-plan.yaml` |
+| 검사 시작 URL | `${STAGING_URL}/posts` |
+| 인증 Context URL | `${STAGING_URL}` |
+| 테스트 사용자 Variable | `ZAP_AUTH_USERNAME=user1` |
+| 테스트 비밀번호 Secret | `ZAP_AUTH_PASSWORD` |
+| 로그인 검증 | `GET /posts` 응답에 `로그아웃` 또는 `/logout` 포함 |
+| 결과 파일 | `security/reports/zap-report.json` |
+| 오류 처리 | 인증 Plan 종료 코드 `1`/`2`, 결과 누락, JSON 오류를 스캐너 실패로 처리하고 `|| true`를 사용하지 않음 |
+
+Workflow에 연결된 ZAP 실행 명령:
+
+```bash
+python3 .secure-gate/scripts/run-zap-validation.py \
+  --profile post-merge \
+  --target-url "${STAGING_URL}/posts" \
+  --auth-context-url "${STAGING_URL}" \
+  --auth-username "${ZAP_AUTH_USERNAME}" \
+  --auth-plan .secure-gate/security/zap/secure-gate-auth-plan.yaml \
+  --reports-dir security/reports
+```
+
+실행 환경에는 Secret을 다음 이름으로 주입한다.
+
+```text
+ZAP_AUTH_PASSWORD <- GitHub Actions Repository Secret ZAP_AUTH_PASSWORD
+```
+
+Custom Runtime Check에서도 같은 테스트 계정을 사용하려면 동일한 Secret 값을 `CUSTOM_RUNTIME_PASSWORD` 환경변수로 매핑한다. Secret 값은 Workflow 명령 인자, 저장소 파일, 로그에 직접 작성하지 않는다.
 
 현재 공용 Staging 기준값:
 
 ```text
 STAGING_URL=http://www.securegate.n-e.kr
 ZAP_TARGET_URL=http://www.securegate.n-e.kr/posts
+ZAP_AUTH_PLAN=security/zap/secure-gate-auth-plan.yaml
+ZAP_AUTH_CONTEXT_URL=http://www.securegate.n-e.kr
+ZAP_AUTH_USERNAME=user1
 NUCLEI_TARGET_URL=http://www.securegate.n-e.kr/posts
 DYNATRACE_ENV_URL=https://xlj20734.live.dynatrace.com
 DYNATRACE_PROBLEM_SELECTOR=status("open")
@@ -311,18 +350,36 @@ Merge가 이미 끝난 뒤 실행되는 검사이므로 이 단계의 실패는 
 
 두 스캐너는 동시에 실행하지 않는다. ZAP Active Scan과 Nuclei가 같은 Staging에 동시에 많은 요청을 보내면 앱 부하가 커지고 어떤 도구가 장애를 유발했는지 구분하기 어려우므로 ZAP 완료 후 Nuclei를 실행한다. 대상은 승인된 Staging ALB 도메인으로 한정하고 Production URL에는 실행하지 않는다.
 
-### 1. ZAP Full Scan
+### 1. ZAP 인증 Full Scan
 
-ZAP `zap-full-scan.py`는 Spider로 경로를 수집하고 Passive Scan에 이어 실제 공격 요청을 보내는 Active Scan을 수행한다. 전체 실행 시간은 Python 실행기 내부 timeout 30분으로 제한하고, Spider 탐색 시간은 `-m 5`, ZAP 시작과 Passive Scan 대기 시간은 `-T 10`으로 제한한다. `-j`는 Ajax Spider를 추가한다.
+비인증 `zap-full-scan.py`만 실행하면 로그인 뒤 URL은 로그인 페이지로 돌아가기 때문에 취약점이 없어도 검사되지 않은 상태가 될 수 있다. Merge 이후에는 `secure-gate-auth-plan.yaml`을 사용해 form login, cookie session, 로그인 상태 검증, 인증 사용자 Spider와 Active Scan을 순서대로 실행한다.
 
 ```bash
+export ZAP_AUTH_USERNAME=user1
+export ZAP_AUTH_PASSWORD="<GitHub Secret에서 주입>"
+
 python3 scripts/run-zap-validation.py \
   --profile post-merge \
   --target-url "${ZAP_TARGET_URL:-${STAGING_URL}/posts}" \
+  --auth-context-url "${STAGING_URL}" \
+  --auth-plan security/zap/secure-gate-auth-plan.yaml \
   --reports-dir security/reports
 ```
 
-`post-merge` 프로필은 내부에서 `zap-full-scan.py`, Spider 5분, Passive Scan 대기 10분, Ajax Spider, 전체 timeout 30분을 적용한다. ZAP의 `0`은 경고와 실패가 없는 실행, `1`은 FAIL finding, `2`는 WARN finding이므로 세 코드는 정상적으로 `zap-report.json`을 Runtime Validation에 전달한다. ZAP 자체 오류 `3`, Docker 오류, timeout, 결과 누락, JSON 오류는 실행기 종료 코드 `2`로 Post-deploy Job을 실패시킨다.
+인증 Plan은 다음 순서로 실행된다.
+
+```text
+Context에 Staging URL 등록
+-> POST /login에 테스트 계정 주입
+-> cookie session 유지
+-> 로그인 응답에서 로그아웃 표시 확인
+-> 인증 사용자로 Spider
+-> Passive Scan 완료 대기
+-> 인증 사용자로 Active Scan
+-> zap-report.json 생성
+```
+
+Automation Framework의 종료 코드 `1` 또는 `2`는 인증·Plan 오류나 경고이므로 실행 실패로 처리한다. 일반 `zap-baseline.py`와 `zap-full-scan.py` 모드에서만 finding 종료 코드 `1`, `2`를 정상 결과로 받아 Runtime Validation에 전달한다. Docker 오류, timeout, 결과 누락, JSON 오류도 실행기 종료 코드 `2`로 처리한다.
 
 결과 파일:
 
@@ -338,13 +395,12 @@ Nuclei에는 ZAP의 `zap-full-scan.py`와 같은 단일 Full Scan 모드가 없�
 python3 scripts/run-nuclei-validation.py \
   --profile post-merge \
   --target-url "${NUCLEI_TARGET_URL:-${STAGING_URL}/posts}" \
-  --trivy-report "${TRIVY_REPORT_PATH:-security/reports/dependency-report.json}" \
   --reports-dir security/reports
 ```
 
 `post-merge` 프로필은 태그 제한 없음, `low,medium,high,critical`, `rate-limit=20`, `concurrency=10`, `bulk-size=10`, 재시도 1회, 요청 timeout 10초, 전체 timeout 30분을 적용한다. Interactsh도 기본 활성화하므로 외부 OAST를 허용하지 않는 팀 정책이면 `--disable-interactsh`를 추가하고 탐지 범위 감소를 기록한다.
 
-Trivy 리포트가 있으면 High/Critical CVE 템플릿 우선 검사도 이어서 수행한다. Post-merge 광범위 검사는 Trivy 리포트가 없어도 실행되며, 이 경우 `nuclei-cve-coverage.json`에 `skipped: trivy-report-not-found`가 기록된다. PR 프로필은 C파트 Artifact 연동 누락을 숨기지 않기 위해 기본적으로 Trivy 리포트를 필수로 요구한다.
+Post-merge 프로필은 작업 디렉터리에 `dependency-report.json`이 존재하거나 `--trivy-report`가 전달돼도 Trivy CVE 입력을 사용하지 않는다. 기본 광범위 스캔만 실행하고 `nuclei-cve-coverage.json`에는 `skipped: disabled-for-post-merge-full-scan`을 기록한다. Trivy CVE 기반 Nuclei 검사는 PR 프로필에만 남기며, PR에서는 C파트 Artifact 연동 누락을 숨기지 않도록 Trivy 리포트를 필수로 요구한다.
 
 Headless와 Fuzzing 템플릿은 기본 실행 범위와 부하 특성이 다르므로 이 Merge 이후 기본 명령에는 자동으로 포함하지 않는다. 필요하면 `-headless`, `-fuzz`를 사용하는 별도 야간/수동 정밀 검사로 분리하고, 상태 변경 가능성과 실행 시간을 먼저 검토한다.
 
@@ -379,7 +435,7 @@ Active Scan 뒤에도 `GET /posts`가 `200`인지 다시 확인해 스캔으로 
 
 `RUNTIME_REQUIRED_REPORTS`는 Post-merge 전용 안전장치다. 파일이 없으면 "취약점 없음"으로 처리하지 않고 High finding을 생성한다. `nuclei-cve-coverage.json`의 상태가 `failed`여도 `runtime.nuclei.execution-failed` High finding으로 변환한다. PR 단계의 기존 호환성을 위해 기본값은 `none`이다.
 
-현재 명령은 비인증 스캔이다. 로그인 뒤에만 접근 가능한 화면까지 정밀 검사하려면 B파트가 테스트 계정과 인증 흐름을 확정한 뒤 ZAP Context/User 설정과 Nuclei 인증 헤더 또는 쿠키를 별도로 추가해야 한다.
+ZAP 인증 스캔은 기술적인 SQLi/XSS와 인증 뒤 URL 탐색을 담당한다. 관리자 권한 우회와 IDOR처럼 정상 소유권을 도구가 추론하기 어려운 항목은 기존 Custom Runtime Check가 같은 테스트 계정으로 별도 확인한다. 로그인 자체가 실패하거나 로그인 성공 표시를 찾지 못하면 취약점 0건으로 통과시키지 않고 High `scanner-error`를 생성한다.
 
 고정 Staging이 아직 해당 PR 코드로 갱신되지 않은 상태라면 PR 전 검사를 이 URL에 실행해도 PR 변경분을 검증하는 것이 아니다. PR 단계는 runner-local/Preview 환경을 사용하고, 고정 Staging Dynatrace 연동은 배포 후 검증에 사용한다.
 
@@ -405,7 +461,7 @@ DAST는 소스 파일 자체가 아니라 실제로 실행 중인 웹에 HTTP �
 
 ### 1. PostgreSQL과 FastAPI 임시 실행
 
-다음 명령은 A파트가 Workflow step으로 옮길 실행 예시다. D파트는 이 명령을 문서로 전달하고 Workflow YAML은 수정하지 않는다.
+다음 명령은 Reusable Workflow Runtime Job에 연결된 실행 방식의 로컬 재현 예시다.
 
 ```bash
 python3 -m venv web/.venv
@@ -675,7 +731,7 @@ CUSTOM_RUNTIME_CHECKS="debug-exposure,docs-exposure,reflected-xss,search-sqli,ad
 python3 scripts/runtime-validation.py
 ```
 
-A파트는 아래 흐름을 `.github/workflows/pr-security-gate.yml`의 `runtime-validation` Placeholder Job에 등록해야 한다. D파트는 Workflow YAML을 직접 수정하지 않고 이 가이드의 명령어를 전달한다.
+아래 흐름은 `.github/workflows/pr-security-gate.yml`의 Runtime Validation Job에 연결되어 있다. A파트는 Caller에서 실행 명령과 대상 URL을 입력으로 전달한다.
 
 등록 대상 PR Workflow 흐름:
 
@@ -710,6 +766,10 @@ Fixed Staging이면 fetch-dynatrace-problems.py 실행
 | `ZAP_PASSIVE_WAIT_MINUTES` | ZAP 시작과 Passive Scan 최대 대기 | PR 5분 / Post-merge 10분 |
 | `ZAP_SCAN_TIMEOUT` | ZAP 전체 실행 제한 | PR 10분 / Post-merge 30분 |
 | `ZAP_AJAX_SPIDER` | Ajax Spider 사용 여부 | PR false / Post-merge true |
+| `ZAP_AUTH_PLAN` | 인증 Automation Framework Plan 경로. 설정하면 일반 packaged scan 대신 인증 Plan 실행 | 없음 |
+| `ZAP_AUTH_CONTEXT_URL` | 로그인과 세션을 적용할 애플리케이션 최상위 URL | Target URL의 scheme + host |
+| `ZAP_AUTH_USERNAME` | ZAP 인증 검사 전용 일반 사용자 계정 | 없음 |
+| `ZAP_AUTH_PASSWORD` | ZAP 인증 검사 전용 비밀번호. GitHub Secret에서 주입 | 없음 |
 | `NUCLEI_TARGET_URL` | Nuclei 대상 URL. 미설정 시 `ZAP_TARGET_URL`, `RUNTIME_BASE_URL`, `STAGING_URL` 순서로 사용 | 없음 |
 | `NUCLEI_SEVERITIES` | 실행할 Nuclei 템플릿 severity 범위. PR 단계에서도 필수 탐지 범위인 Medium 이상은 포함 | `medium,high,critical` |
 | `NUCLEI_TAGS` | PR 단계에서 실행할 Nuclei 템플릿 태그 범위 | `xss` |
@@ -734,6 +794,8 @@ Fixed Staging이면 fetch-dynatrace-problems.py 실행
 | `CUSTOM_RUNTIME_USERNAME` | 인증 기반 custom 검사에 사용할 일반 사용자 계정 | `user1` |
 | `CUSTOM_RUNTIME_PASSWORD` | 인증 기반 custom 검사에 사용할 일반 사용자 비밀번호 | `password123` |
 | `CUSTOM_RUNTIME_PRIVATE_POST_ID` | IDOR custom 검사 대상 private post id | `4` |
+| `CUSTOM_RUNTIME_LOGIN_VERIFY_PATH` | 로그인 성공 여부를 확인할 인증 화면 | `/posts` |
+| `CUSTOM_RUNTIME_LOGGED_IN_MARKERS` | 인증 화면에 있어야 하는 로그인 성공 표시 | `로그아웃,/logout` |
 | `CUSTOM_RUNTIME_SQLI_PAYLOAD` | 검색 SQLi custom 검사에 사용할 payload | `') OR '1'='1' --` |
 | `ZAP_REPORT_PATH` | OWASP ZAP JSON 리포트 경로 | `security/reports/zap-report.json` |
 | `NUCLEI_REPORT_PATH` | Nuclei JSONL 리포트 경로 | `security/reports/nuclei-report.jsonl` |
@@ -765,6 +827,8 @@ HTTPS 대상이면 `strict-transport-security`가 필수 헤더 목록에 자동
 | `search-sqli` | 검색 SQLi payload로 비공개 게시글이 공개 검색 응답에 섞이는지 확인 | `runtime.custom.search-sqli.private-posts` |
 | `admin-access` | 일반 사용자 `user1`로 로그인한 뒤 `/admin` 접근이 가능한지 확인 | `runtime.custom.admin-access.user-role` |
 | `idor` | 일반 사용자 `user1`로 로그인한 뒤 다른 사용자의 private post 접근 가능 여부 확인 | `runtime.custom.idor.private-post` |
+
+`admin-access`와 `idor`는 한 번 검증된 cookie session을 공유한다. 로그인 요청이 성공 Status를 반환하더라도 `/posts`에서 로그인 성공 표시를 찾지 못하면 두 검사를 실행하지 않고 `runtime.custom.authentication.failed` High finding 한 건을 생성한다. 따라서 비밀번호 오류나 로그인 화면 변경을 "취약점 없음"으로 오인하지 않는다.
 
 삭제, 대용량 업로드, 계정 잠금 반복 시도처럼 상태 변경이 큰 검사는 PR 단계 기본 custom check에 포함하지 않는다. 필요하면 별도 merge 이후 또는 정기 스캔으로 분리한다.
 
@@ -819,6 +883,7 @@ security/reports/dynatrace-problems.json
 | Health Check | 요청 실패 또는 기대하지 않은 Status | High |
 | Smoke Test | 요청 실패 또는 기대하지 않은 Status | High |
 | Security Header | 필수 헤더 누락 | Medium |
+| 인증 Custom Check | 계정 누락, 로그인 실패, 로그인 성공 표시 미확인 | High / scanner-error |
 | ZAP | `riskcode=4` | Critical |
 | ZAP | `riskcode=3` | High |
 | ZAP | `riskcode=2` | Medium |
@@ -846,7 +911,7 @@ ZAP Baseline은 GitHub Actions에서 Docker로 실행하고, JSON 결과를 아�
 security/reports/zap-report.json
 ```
 
-권장 실행 명령:
+비인증 PR Baseline 권장 실행 명령:
 
 ```bash
 python3 scripts/run-zap-validation.py \
@@ -859,6 +924,21 @@ python3 scripts/run-zap-validation.py \
 
 B파트 취약 웹 앱처럼 `/`가 404이고 `/posts`가 실제 진입 화면인 경우, `RUNTIME_BASE_URL`은 루트 URL로 두고 `ZAP_TARGET_URL`만 `/posts`까지 포함해서 지정한다.
 
+로그인 뒤에만 접근 가능한 화면을 검사하는 Merge 이후 명령:
+
+```bash
+ZAP_AUTH_USERNAME=user1 \
+ZAP_AUTH_PASSWORD="<Secret>" \
+python3 scripts/run-zap-validation.py \
+  --profile post-merge \
+  --target-url "${STAGING_URL}/posts" \
+  --auth-context-url "${STAGING_URL}" \
+  --auth-plan security/zap/secure-gate-auth-plan.yaml \
+  --reports-dir security/reports
+```
+
+인증 Plan 파일에는 비밀번호가 없으며 `${ZAP_AUTH_PASSWORD}` 환경변수 참조만 있다. 다른 애플리케이션은 로그인 URL, 필드 이름, 성공·실패 표시가 다르므로 해당 앱 소유 저장소가 별도 Plan을 제공하고 같은 실행기에 `--auth-plan`으로 전달한다. Plan은 최종적으로 `/zap/wrk/zap-report.json`을 생성해야 한다.
+
 ---
 
 ## Nuclei 연동
@@ -869,16 +949,17 @@ Nuclei는 GitHub Actions에서 Docker로 실행하고, JSONL 결과를 아래 �
 security/reports/nuclei-report.jsonl
 ```
 
-권장 실행 명령:
+PR 단계 권장 실행 명령:
 
 ```bash
 python3 scripts/run-nuclei-validation.py \
+  --profile pr \
   --target-url "${NUCLEI_TARGET_URL:-${ZAP_TARGET_URL:-$RUNTIME_BASE_URL}}" \
   --trivy-report "${TRIVY_REPORT_PATH:-security/reports/dependency-report.json}" \
   --reports-dir "${SECURITY_REPORTS_DIR:-security/reports}"
 ```
 
-실행기는 기본 검사, Trivy CVE 추출, 템플릿 사전 확인, 조건부 CVE 검사와 JSONL 통합을 한 번에 처리한다. `runtime-validation.py`는 통합 JSONL을 한 줄씩 읽어 `runtime.nuclei.<template-id>` finding으로 변환한다. Nuclei의 `critical/high/medium/low`는 그대로 매핑하고, `info/unknown`은 팀 공통 schema에 맞춰 `low`로 기록한다. PR 단계 기본값은 `medium,high,critical`, `xss`, 전체 timeout 5분, 요청 timeout 5초, `rate-limit 10`, concurrency 5, retries 0, Interactsh 비활성화다. 원본 HTTP 요청·응답은 `-omit-raw`로 제외해 Artifact 크기와 민감정보 노출 가능성을 줄인다.
+PR 프로필 실행기는 기본 검사, Trivy CVE 추출, 템플릿 사전 확인, 조건부 CVE 검사와 JSONL 통합을 한 번에 처리한다. Post-merge 프로필은 Trivy 입력을 읽지 않고 광범위 기본 검사만 실행한다. `runtime-validation.py`는 통합 JSONL을 한 줄씩 읽어 `runtime.nuclei.<template-id>` finding으로 변환한다. Nuclei의 `critical/high/medium/low`는 그대로 매핑하고, `info/unknown`은 팀 공통 schema에 맞춰 `low`로 기록한다. PR 단계 기본값은 `medium,high,critical`, `xss`, 전체 timeout 5분, 요청 timeout 5초, `rate-limit 10`, concurrency 5, retries 0, Interactsh 비활성화다. 원본 HTTP 요청·응답은 `-omit-raw`로 제외해 Artifact 크기와 민감정보 노출 가능성을 줄인다.
 
 ---
 

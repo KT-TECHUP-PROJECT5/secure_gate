@@ -50,14 +50,18 @@ flowchart TD
     K -- Warning --> M[PR 댓글 경고]
     K -- Yes --> N[PR Check 성공 / Merge 허용]
 
+    J --> X[비차단 AI 결과 설명 생성]
     J --> O[PR Comment Bot 결과 요약 댓글 작성]
+    X --> O
 
     N --> P[main 브랜치 Merge]
     P --> Q[CD Workflow 실행]
     Q --> R[Docker Build]
     R --> S[Staging Deploy]
     S --> T[Post-deploy Validation]
-    T --> U{배포 검증 통과?}
+    T --> Y[Post-merge Aggregator / Policy Evaluator]
+    Y --> Z[비차단 AI 결과 설명 생성]
+    Y --> U{배포 검증 통과?}
 
     U -- No --> V[Production 배포 차단 또는 Rollback]
     U -- Yes --> W[Production 배포 가능]
@@ -79,6 +83,7 @@ flowchart TD
 | Runtime Validation | Health Check, Smoke Test, 보안 헤더, Custom Runtime Check, ZAP/Nuclei 및 Dynatrace 문제 결과 정규화, Trivy CVE 우선 검사 |
 | Aggregator | 각 보안 도구의 결과 파일을 하나의 Summary로 통합 |
 | Policy Evaluator | 위험도 및 정책 기준으로 Merge/배포 가능 여부 판단 |
+| AI Security Report | 확정 Gate 결과를 사람이 읽기 쉽게 요약하고 간단한 개선 방향 제시 |
 | Merge 차단 | Critical/High 취약점 또는 Secret 탐지 시 PR 자동 차단 |
 | PR 댓글 자동화 | 검사 결과, 차단 사유, 수정 가이드를 PR 댓글로 제공 |
 | CD Workflow | main Merge 이후 Docker Build 및 Staging 자동 배포 |
@@ -100,6 +105,14 @@ flowchart TD
 | 검사 통과 | Merge 허용 |
 
 정책 기준은 `security/policies/security-gate-policy.json`에서 관리하며, OWASP/CVSS 기준에 따라 세분화 가능하다.
+Policy v2는 `vuln`, `misconfig`, `secret`, `availability`, `scanner-error` 카테고리와
+`pr`, `post_merge`, `training` 프로필을 함께 사용한다. 필수 보고서 오류와
+알 수 없는 severity는 기본적으로 차단하며, 승인자·소유자·사유·만료일이 있는 예외만
+`security/policies/suppressions.json`에서 관리한다. Secret finding에는 예외를 적용하지 않는다.
+
+교육용 취약 앱은 기본 정책을 완화하지 않고 실행할 때만
+`SECURE_GATE_PROFILE=training`을 지정한다. 이 경우 Critical/High/Medium은 경고로
+기록하지만 Secret과 필수 검사 오류는 계속 차단한다.
 
 ---
 
@@ -145,6 +158,7 @@ Gate Status: ❌ FAILED
 | Observability | Dynatrace OneAgent, Problems API v2 |
 | Runtime Validation | Health Check, Smoke Test, Security Header Check, 결과 정규화 |
 | Aggregator / Policy Evaluator | Python |
+| AI Report | OpenAI Responses API, Structured Outputs |
 | PR Comment | GitHub API |
 | Deployment | Docker Build, Staging Deploy |
 
@@ -158,8 +172,21 @@ Gate Status: ❌ FAILED
    `.github/workflows/post-merge-security-gate.yml`로 복사한다.
 3. `uses:` 경로의 태그를 `@v1`(또는 `@v1.0.0`)로 맞춘다.
 4. 필요한 Organization Secrets와 Variables를 등록하고 대상 저장소에 접근을 허용한다.
-5. Post-merge caller의 `Deploy Staging`을 실제 배포 Workflow `name:`으로 변경한다.
-6. Branch Protection에서 Secure PR Gate Check를 Required로 설정한다.
+5. (선택) PR 단계 DAST를 쓰려면 `enable_dast: true`와 `install_command` / `build_command` / `start_command`를 설정한다.
+   EC2는 필수가 아니다. runner에서 앱을 띄운 뒤 localhost 대상으로 검사한다.
+6. Post-merge caller의 `Deploy Staging`을 실제 배포 Workflow `name:`으로 변경한다.
+   `STAGING_URL`, `DYNATRACE_ENV_URL`,
+   `DYNATRACE_PROBLEM_SELECTOR`, `DYNATRACE_ENTITY_SELECTOR`,
+   `DYNATRACE_SERVICE_ENTITY_SELECTOR`, `DAST_SCAN_PATH`,
+   `ZAP_AUTH_PLAN`, `ZAP_AUTH_USERNAME`, `CUSTOM_RUNTIME_CHECKS`,
+   `CUSTOM_RUNTIME_USERNAME` Repository Variables와
+   `DEPENDENCY_TRACK_URL`, `DEPENDENCY_TRACK_API_KEY`, `DYNATRACE_TOKEN`,
+   `ZAP_AUTH_PASSWORD`, `CUSTOM_RUNTIME_PASSWORD` Secrets를 등록한다.
+   AI 설명 보고서를 사용하려면 `OPENAI_API_KEY` Secret도 등록한다.
+   이 Secret이 없거나 API 호출이 실패해도 Gate 판정에는 영향을 주지 않는다.
+   두 entity selector는
+   전체 서비스가 아닌 해당 애플리케이션으로 범위를 제한해야 한다.
+7. Branch Protection에서 Secure PR Gate Check를 Required로 설정한다.
 
 ### 검사 모드
 
@@ -178,11 +205,19 @@ Hard Gate는 Merge 이후 실행되므로 Merge 자체가 아니라 후속 배�
 | Secret | `DEPENDENCY_TRACK_API_KEY` | SBOM 업로드 API Key |
 | Secret | `DYNATRACE_TOKEN` | Hard Gate Dynatrace 조회 Token |
 | Secret | `DISCORD_WEBHOOK_URL` | 선택적 Gate 결과 알림 |
+| Secret | `OPENAI_API_KEY` | 선택적 비차단 AI 설명 보고서 |
+| Secret | `ZAP_AUTH_PASSWORD` | 인증 ZAP 검사 계정 비밀번호 |
+| Secret | `CUSTOM_RUNTIME_PASSWORD` | 인증 Custom Runtime Check 계정 비밀번호 |
 | Variable | `STAGING_URL` | Hard Gate 검사 대상 URL |
 | Variable | `DYNATRACE_ENV_URL` | Dynatrace Environment URL |
 | Variable | `DYNATRACE_PROBLEM_SELECTOR` | Problems API selector |
 | Variable | `DYNATRACE_ENTITY_SELECTOR` | 애플리케이션 Entity selector |
 | Variable | `DYNATRACE_SERVICE_ENTITY_SELECTOR` | 서비스 Entity selector |
+| Variable | `DAST_SCAN_PATH` | DAST 진입 경로 |
+| Variable | `ZAP_AUTH_PLAN` | ZAP 인증 Automation Plan 경로 |
+| Variable | `ZAP_AUTH_USERNAME` | ZAP 인증 계정명 |
+| Variable | `CUSTOM_RUNTIME_CHECKS` | 실행할 Custom Runtime Check 목록 |
+| Variable | `CUSTOM_RUNTIME_USERNAME` | Custom Runtime Check 인증 계정명 |
 
 공통 값은 Organization 수준에 등록하고 `Selected repositories`로 필요한 저장소만 허용한다.
 Secret 실제 값은 코드나 README에 작성하지 않는다.
@@ -239,8 +274,9 @@ DT 업로드 성공은 `dependency-track-upload-report.json`의
 - Soft Gate: 테스트 브랜치를 push하고 `main` 대상 PR을 생성한다.
 - Hard Gate: 필수 설정 등록 후 `Actions → Manual - Staging Security Validation → Run workflow`를 실행한다.
 
-AI/LLM 보고서는 [AI 입력 계약](docs/AI-reference.md)만 정의되어 있으며
-현재 Workflow에는 실제 LLM API 호출 단계가 연결되어 있지 않다.
+AI/LLM 보고서는 확정된 Gate 결과를 입력으로 OpenAI Responses API를 선택적으로 호출한다.
+API 호출 결과는 설명과 개선 방향에만 사용하며, Merge/배포 판정은
+결정론적인 `gate-decision.json`만 기준으로 한다.
 
 ### 버전 태그 배포 (maintainers)
 
@@ -279,6 +315,7 @@ uses: KT-TECHUP-PROJECT5/secure_gate/.github/workflows/pr-security-gate.yml@v1
 ├── scripts/
 │   ├── aggregate-results.py           # 보안 검사 결과 통합
 │   ├── evaluate-gate.py               # 정책 기반 Gate 판단
+│   ├── generate-ai-security-summary.py # 비차단 AI 요약 및 개선 방향 생성
 │   ├── create-pr-comment.py           # PR 댓글 자동 작성
 │   ├── upload-sbom-to-dependency-track.py # SBOM을 Dependency-Track에 업로드
 │   ├── runtime-validation.py          # D파트 Runtime Validation 통합 및 필수 결과 검증
@@ -289,7 +326,8 @@ uses: KT-TECHUP-PROJECT5/secure_gate/.github/workflows/pr-security-gate.yml@v1
 │
 ├── security/
 │   ├── policies/
-│   │   └── security-gate-policy.json  # Merge 차단 정책
+│   │   ├── security-gate-policy.json  # Merge 차단 정책
+│   │   └── suppressions.json          # 승인자·소유자·사유·만료일 기반 예외
 │   ├── reports/                        # 보안 검사 결과 저장
 │   └── templates/
 │       └── pr-comment-template.md      # PR 댓글 템플릿
@@ -297,6 +335,7 @@ uses: KT-TECHUP-PROJECT5/secure_gate/.github/workflows/pr-security-gate.yml@v1
 └── docs/
     ├── project.md                 # 프로젝트 가이드
     ├── pipeline-guide.md          # 파이프라인 운영 가이드
+    ├── ai-security-report.md      # AI 결과 설명 계층 가이드
     ├── team-interface.md          # 팀 연동 인터페이스 및 협업 프로세스
     └── tasks/
         ├── A-part-task.md         # A파트 작업 체크리스트

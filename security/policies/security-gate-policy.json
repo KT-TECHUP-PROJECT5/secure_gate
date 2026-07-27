@@ -1,12 +1,53 @@
 {
-  "blockOnSecret": true,
-  "blockOnScannerError": true,
-  "blockOnAvailability": true,
-  "blockOnAvailabilityMedium": false,
-  "blockOnVulnCritical": true,
-  "blockOnVulnHigh": true,
-  "warnOnMedium": true,
-  "warnOnMisconfig": true,
+  "version": 2,
+  "defaultProfile": "pr",
+  "profiles": {
+    "pr": {
+      "blockOnSecret": true,
+      "blockOnScannerError": true,
+      "blockOnAvailability": true,
+      "blockOnAvailabilityMedium": false,
+      "blockOnVulnCritical": true,
+      "blockOnVulnHigh": true,
+      "warnOnVulnCritical": false,
+      "warnOnVulnHigh": false,
+      "warnOnAvailability": false,
+      "warnOnMedium": true,
+      "warnOnMisconfig": true,
+      "unknownSeverity": "block"
+    },
+    "post_merge": {
+      "blockOnSecret": true,
+      "blockOnScannerError": true,
+      "blockOnAvailability": true,
+      "blockOnAvailabilityMedium": false,
+      "blockOnVulnCritical": true,
+      "blockOnVulnHigh": true,
+      "warnOnVulnCritical": false,
+      "warnOnVulnHigh": false,
+      "warnOnAvailability": false,
+      "warnOnMedium": true,
+      "warnOnMisconfig": true,
+      "unknownSeverity": "block"
+    },
+    "training": {
+      "blockOnSecret": true,
+      "blockOnScannerError": true,
+      "blockOnAvailability": false,
+      "blockOnAvailabilityMedium": false,
+      "blockOnVulnCritical": false,
+      "blockOnVulnHigh": false,
+      "warnOnVulnCritical": true,
+      "warnOnVulnHigh": true,
+      "warnOnAvailability": true,
+      "warnOnMedium": true,
+      "warnOnMisconfig": true,
+      "unknownSeverity": "warn"
+    }
+  },
+  "exceptionPolicy": {
+    "file": "suppressions.json"
+  },
   "cveTrack": {
     "enabled": "monitor",
     "decisionFile": "security/reports/cve-policy-decision.json",

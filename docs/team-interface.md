@@ -142,7 +142,7 @@ steps:
 | Post-merge Reusable Workflow      | `post-merge-security-gate.yml`을 각 애플리케이션의 Staging 배포 성공 후 caller가 호출                                                                                                                             | 연결 완료                                           |
 | Merge 이후 ZAP Full Scan          | ECS 배포와 Health Check 뒤 `run-zap-validation.py --profile post-merge`; Spider 5분, Ajax Spider, 전체 timeout 30분                                                                                               | CD Workflow 연결 완료                               |
 | Merge 이후 Nuclei 광범위 스캔     | `run-nuclei-validation.py --profile post-merge`로 태그 제한 없이 `low,medium,high,critical`, `rate-limit=20`, `c=10`, 전체 timeout 30분 실행                                                                      | CD Workflow 연결 완료                               |
-| Trivy CVE 기반 Nuclei 우선 검사   | `scripts/run-nuclei-validation.py`가 C파트 `dependency-report` Artifact의 High/Critical CVE 추출, `nuclei -tl` 사전 확인, 조건부 CVE 검사와 기본 결과 통합을 수행                                                 | Artifact 다운로드 연결 완료                         |
+| PR Trivy CVE 기반 Nuclei 우선 검사 | `scripts/run-nuclei-validation.py --profile pr`이 C파트 `dependency-report` Artifact의 High/Critical CVE 추출, `nuclei -tl` 사전 확인, 조건부 CVE 검사와 기본 결과 통합을 수행. Post-merge에서는 사용하지 않음 | Artifact 다운로드 연결 완료 |
 | Trivy-Nuclei 결과 해석 기준       | `Trivy 후보 CVE 수 → Nuclei 매칭 템플릿 수 → Nuclei 실제 finding 수`를 구분. 매칭 템플릿 0개는 `passed`가 아니라 `skipped`, Trivy finding은 Gate에 유지                                                           | D파트 기준 확정 / A·E파트 반영 필요                 |
 | Trivy-Nuclei 수동 검증            | Next.js 포트폴리오 기준 Trivy 22건, High 8건, CVE 후보 5개, 매칭 템플릿 1개, 실제 finding 0개 확인                                                                                                                | D파트 검증 완료                                     |
 | Staging Nuclei 검증               | `http://www.securegate.n-e.kr/posts` 기준 Trivy CVE 후보 8개, 매칭 템플릿 0개, 기본 XSS finding 2개. CVE 검사는 `skipped: no-matching-nuclei-template`                                                            | D파트 검증 완료                                     |
@@ -163,8 +163,8 @@ steps:
 
 ## Policy / Aggregator
 
-E 파트의 자동 수정 가이드 생성은 계획에서 제외한다.
-Aggregator/Policy는 아래 기준선으로 진행한다.
+자동 코드 수정은 계획에서 제외한다.
+Aggregator/Policy와 비차단 AI 설명은 아래 기준선으로 진행한다.
 
 | 항목                         | 내용                                                              | 상태                     |
 | ---------------------------- | ----------------------------------------------------------------- | ------------------------ |
@@ -173,10 +173,13 @@ Aggregator/Policy는 아래 기준선으로 진행한다.
 | Block                        | Secret, 실제 고위험 vuln, Health/Smoke 실패, 스캐너 기술 실패     | 코드 반영                |
 | Warn                         | misconfig(헤더/HTTP Only/캐시), Medium                            | 코드 반영                |
 | Aggregator 기준선            | `docs/aggregator-policy-baseline.md` Baseline v0.2                | 진행 기준                |
-| 예외 승인                    | `security/policies/suppressions.json` (사유·승인자·만료일)        | 기본 골격 반영           |
-| 현재 코드                    | category 기반 Block/Warn (`scripts/gate_policy.py`)               | 운영 준비                |
-| AI 결과 보고서 / 수정 가이드 | 별도 담당 (`docs/AI-reference.md`)                                | 본 범위 제외             |
-| IR 플레이북                  | `docs/incident-response-playbook.md` (사람 대응/SLA)              | 반영                     |
+| 정책 프로필                  | `pr` / `post_merge` 동일 차단, `training` 교육용 경고 완화        | 코드 반영                |
+| 예외 승인                    | `security/policies/suppressions.json` (사유·소유자·승인자·만료일) | 코드 반영                |
+| 현재 코드                    | category + profile 기반 Block/Warn                                | 운영 준비                |
+| AI 결과 보고서               | 확정 Gate 뒤에서 요약·개선 방향 생성, 판정에는 영향 없음          | PR/Post-merge 연결 완료  |
+| CVE 보정 트랙                | Dependency CVE를 KEV·EPSS 근거로 보정, 기본 monitor/annotateOnly  | 코드 반영                |
+| AI 참고 문서                 | `docs/AI-reference.md`                                            | 반영                     |
+| IR 플레이북                  | `docs/IR-playbook.md` (사람 대응/SLA)              | 반영                     |
 | ZAP XSS 탐지 고도화          | DAST 고도화로 이관                                                | 보류                     |
 | Discord 요약 알림            | Soft/Hard `gate-decision` 요약 webhook (`docs/discord-notification.md`) | 구현 중                  |
 
@@ -199,3 +202,5 @@ Aggregator/Policy는 아래 기준선으로 진행한다.
 | D - Runtime Validation  | `security/reports/runtime-report.json`                      |
 | A - Summary             | `security/reports/security-summary.json`                    |
 | A - Gate Decision       | `security/reports/gate-decision.json`                       |
+| AI - Structured Summary | `security/reports/ai-security-summary.json`                 |
+| AI - Readable Summary   | `security/reports/ai-security-summary.md`                   |

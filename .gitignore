@@ -6,6 +6,7 @@ security/reports/*.json
 security/reports/*.jsonl
 security/reports/*.sarif
 security/reports/*.txt
+security/reports/*.md
 
 # 로컬에서 내려받은 Actions Artifact 샘플
 testsFiles/
