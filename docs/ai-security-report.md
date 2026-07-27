@@ -182,8 +182,9 @@ PR과 Post-merge reusable workflow는 Gate Evaluator 뒤에서 AI 스크립트�
 - `security/reports/ai-security-summary.md`
 
 두 파일은 PR의 `gate-decision` Artifact와 Post-merge의
-`post-merge-gate-results` Artifact에 포함된다. PR 댓글 생성기는 같은
-Artifact의 AI JSON을 읽어 요약과 우선 개선 방향을 표시한다.
+`post-merge-gate-results` Artifact에 포함된다. 사람이 읽는 Markdown은
+두 Workflow 모두 `ai-security-summary` Artifact로도 단독 업로드한다.
+PR 댓글 생성기는 같은 실행의 AI JSON을 읽어 요약과 우선 개선 방향을 표시한다.
 
 Fork PR처럼 Secret을 사용할 수 없는 실행에서는 AI 상태가 `skipped`가 된다.
 API 오류나 할당량 오류는 `failed`로 기록하지만 기존 Gate 검사는 그대로

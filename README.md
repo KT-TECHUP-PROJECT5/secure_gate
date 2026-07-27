@@ -257,6 +257,7 @@ GitHub의 `Actions → 실행 선택 → Artifacts`에서 결과를 내려받는
 | `dependency-track-upload-report` | DT 업로드 상태 |
 | `runtime-report` | Runtime Validation 통합 결과 |
 | `gate-decision` | Summary와 최종 Gate 판정 |
+| `ai-security-summary` | 사람이 읽는 AI 보안 요약 Markdown 단독 파일 |
 | `post-merge-dependency-reports` | Hard Gate Trivy·SBOM·DT 결과 |
 | `post-merge-runtime-reports` | Hard Gate ZAP·Nuclei·Dynatrace 결과 |
 | `post-merge-gate-results` | Hard Gate 최종 판정 |

@@ -629,6 +629,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-test, sast, secret-scan, dependency-scan, runtime-validation]
     if: always()
+    outputs:
+      ai_report_url: ${{ steps.upload-ai-summary.outputs.artifact-url }}
     steps:
       - name: Checkout caller repository
         uses: actions/checkout@v4
@@ -795,6 +797,15 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: python3 .secure-gate/scripts/generate-ai-security-summary.py
 
+      - name: Upload standalone AI security summary
+        id: upload-ai-summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-security-summary
+          path: security/reports/ai-security-summary.md
+          if-no-files-found: warn
+
       - name: Upload gate results
         uses: actions/upload-artifact@v4
         if: always()
@@ -895,7 +906,8 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           GATE_DECISION_FILE: security/reports/gate-decision.json
           NOTIFY_PROFILE: soft
-          # Soft 결과 리포트 = PR 페이지(댓글). workflow_dispatch면 Actions로 fallback.
+          # PR 결과와 실행별 AI Markdown Artifact를 각각 연결한다.
           PR_COMMENT_URL: ${{ github.event.pull_request.html_url }}
+          AI_REPORT_URL: ${{ needs.aggregate-and-gate.outputs.ai_report_url }}
         run: python3 .secure-gate/scripts/notify-discord.py
         continue-on-error: true

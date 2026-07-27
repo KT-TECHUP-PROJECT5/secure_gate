@@ -12,8 +12,8 @@ Telegram은 범위에서 제외한다.
 
 | 모드 | Discord | 결과 리포트 링크 |
 | --- | --- | --- |
-| Soft | PR 댓글 후 알림 | PR 페이지 (`PR_COMMENT_URL`) |
-| Hard | aggregate 후 알림 | AI/Artifact URL (`AI_REPORT_URL`, 없으면 Actions) |
+| Soft | PR 댓글 후 알림 | PR 페이지와 AI Markdown Artifact |
+| Hard | aggregate 후 알림 | AI Markdown Artifact |
 
 ## 무엇을 보내는가
 
@@ -24,7 +24,7 @@ Telegram은 범위에서 제외한다.
 설명: 차단/통과 한 줄
 레포지토리 | 커밋
 차단사유
-필수 확인: 실행 로그 / 결과 리포트
+필수 확인: 실행 로그 / PR 결과 / AI 보고서 다운로드
 ```
 
 색상: 실패 빨강 / 통과 초록
@@ -37,8 +37,10 @@ Telegram은 범위에서 제외한다.
 
 결과 리포트 URL:
 
-- soft: `PR_COMMENT_URL` (PR html_url) → 없으면 Actions run
-- hard: `AI_REPORT_URL`(repo variable) → 없으면 Actions run
+- `PR_COMMENT_URL`: Soft Gate의 PR 페이지
+- `AI_REPORT_URL`: `actions/upload-artifact@v4`가 반환한 실행별 `artifact-url`
+- AI Artifact는 `ai-security-summary.md` 한 파일만 포함한다.
+- Artifact 다운로드는 저장소 접근 권한이 있는 GitHub 로그인이 필요하다.
 
 ## Caller 설정
 

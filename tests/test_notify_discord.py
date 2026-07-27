@@ -59,7 +59,8 @@ class NotifyDiscordTests(unittest.TestCase):
         self.assertEqual(["레포지토리", "커밋", "차단사유", "필수 확인"], names)
         blob = json.dumps(payload, ensure_ascii=False)
         self.assertIn("실행 로그", blob)
-        self.assertIn("결과 리포트", blob)
+        self.assertIn("AI 보고서 다운로드", blob)
+        self.assertIn("https://example.test/report", blob)
         self.assertNotIn("AI 결과", blob)
         self.assertNotIn("GitHub Actions", blob)
         self.assertNotIn("super-secret-value-should-not-leak", blob)
@@ -88,13 +89,16 @@ class NotifyDiscordTests(unittest.TestCase):
                 "GITHUB_RUN_ID": "99",
                 "GITHUB_SERVER_URL": "https://github.com",
                 "PR_COMMENT_URL": "https://github.com/KT-TECHUP-PROJECT5/web/pull/12",
+                "AI_REPORT_URL": "https://github.com/actions/artifacts/123",
             },
             clear=False,
         ):
             payload = notify.build_message(decision, profile="soft")
         blob = json.dumps(payload, ensure_ascii=False)
         self.assertIn("https://github.com/KT-TECHUP-PROJECT5/web/pull/12", blob)
-        self.assertIn("결과 리포트", blob)
+        self.assertIn("PR 결과", blob)
+        self.assertIn("https://github.com/actions/artifacts/123", blob)
+        self.assertIn("AI 보고서 다운로드", blob)
 
     def test_main_skips_without_webhook(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -8,7 +8,7 @@ gate-decision.json 요약을 Discord Incoming Webhook으로 전송한다.
   제목: Hard/Soft mode · FAILED/SUCCESS
   레포지토리 / 커밋
   차단사유
-  링크: GitHub Actions, 결과 리포트
+  링크: GitHub Actions, PR 결과, AI 보고서 Artifact
 
 환경변수:
   DISCORD_WEBHOOK_URL   Discord webhook URL (없으면 skip)
@@ -18,8 +18,8 @@ gate-decision.json 요약을 Discord Incoming Webhook으로 전송한다.
   GITHUB_SHA            commit sha
   GITHUB_RUN_ID         Actions run id
   GITHUB_SERVER_URL     기본 https://github.com
-  PR_COMMENT_URL        soft 결과 리포트 링크 (PR 페이지/댓글)
-  AI_REPORT_URL         hard 결과 리포트 링크 (없으면 Actions run)
+  PR_COMMENT_URL        soft 결과 링크 (PR 페이지/댓글)
+  AI_REPORT_URL         AI Markdown 단독 Artifact 다운로드 링크
   DISCORD_FAIL_CLOSED   true면 webhook/HTTP 실패 시 exit 1
 """
 
@@ -126,11 +126,8 @@ def build_message(decision: dict, *, profile: str) -> dict:
     short_sha = sha[:7] if sha else "unknown"
     run_url = build_run_url()
     commit_url = build_commit_url(sha)
-    # soft → PR comment/page, hard → AI/artifact report (fallback: Actions run)
-    if profile == "soft":
-        report_url = env("PR_COMMENT_URL") or env("AI_REPORT_URL") or run_url
-    else:
-        report_url = env("AI_REPORT_URL") or run_url
+    pr_url = env("PR_COMMENT_URL")
+    ai_report_url = env("AI_REPORT_URL")
 
     mode_label = "Hard" if profile == "hard" else "Soft"
     title = f"{mode_label} mode · {status}"
@@ -144,11 +141,15 @@ def build_message(decision: dict, *, profile: str) -> dict:
 
     commit_value = f"[`{short_sha}`]({commit_url})" if commit_url else f"`{short_sha}`"
 
-    # Run page = logs first; soft report = PR comment, hard report = result artifact/AI.
+    # Keep logs, PR result, and the standalone AI report as separate destinations.
     action_link = f"[실행 로그]({run_url})" if run_url else "`실행 로그 없음`"
-    report_link = (
-        f"[결과 리포트]({report_url})" if report_url else "`결과 리포트 없음`"
-    )
+    result_links = [action_link]
+    if profile == "soft" and pr_url:
+        result_links.append(f"[PR 결과]({pr_url})")
+    if ai_report_url:
+        result_links.append(f"[AI 보고서 다운로드]({ai_report_url})")
+    else:
+        result_links.append("`AI 보고서 다운로드 링크 없음`")
 
     fields = [
         # 3-column row: repo | spacer | commit → wider horizontal gap
@@ -165,7 +166,7 @@ def build_message(decision: dict, *, profile: str) -> dict:
         },
         {
             "name": "필수 확인",
-            "value": f"{action_link}\n{report_link}",
+            "value": "\n".join(result_links),
             "inline": False,
         },
     ]
