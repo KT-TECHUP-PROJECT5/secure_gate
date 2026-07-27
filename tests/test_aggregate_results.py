@@ -159,6 +159,31 @@ class ScannerNormalizationTests(unittest.TestCase):
         self.assertEqual("pkg:npm/example@1.0.0", report["findings"][0]["purl"])
         self.assertEqual("1.0.1", report["findings"][0]["fixedVersion"])
 
+    def test_trivy_null_or_missing_results_is_valid_empty_report(self):
+        for data in (
+            {"SchemaVersion": 2, "Results": None},
+            {"SchemaVersion": 2},
+        ):
+            with self.subTest(data=data):
+                report = aggregate_results.normalize_report(
+                    "dependency_scan",
+                    data,
+                )
+
+                self.assertEqual("passed", report["status"])
+                self.assertEqual("trivy", report["tool"])
+                self.assertEqual([], report["findings"])
+                self.assertNotIn("errors", report)
+
+    def test_trivy_invalid_results_type_remains_an_error(self):
+        report = aggregate_results.normalize_report(
+            "dependency_scan",
+            {"SchemaVersion": 2, "Results": "invalid"},
+        )
+
+        self.assertEqual("error", report["status"])
+        self.assertEqual(["unsupported-report-schema"], report["errors"])
+
     def test_runtime_misconfig_findings_become_warning_status(self):
         report = aggregate_results.normalize_report(
             "runtime_validation",
