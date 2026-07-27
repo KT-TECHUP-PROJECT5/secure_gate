@@ -237,3 +237,6 @@ uses: KT-TECHUP-PROJECT5/secure_gate/.github/workflows/pr-security-gate.yml@v1
 - SAST, Secret Scan, Dependency Scan, DAST 결과를 하나의 Gate로 통합
 - 개발자에게 PR 댓글로 즉시 수정 가이드 제공
 - 배포 전후의 보안 검증 흐름 확보
+
+## 소프트 모드 테스트를 위한 변경
+12345678
