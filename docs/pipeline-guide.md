@@ -159,6 +159,7 @@ jobs:
 | `target_url` | `""` | 외부 Preview/Staging URL (있으면 localhost 대신 사용) |
 | `dast_scan_path` | `/` | PR DAST 시작 경로. Base URL과 분리하며 취약 앱은 `/posts`처럼 지정 |
 | `policy_path` | `""` | caller 정책 경로 (비어 있으면 기본/로컬 정책) |
+| `gate_profile` | `pr` | 정책 프로필. 일반 PR은 `pr`, 의도적으로 취약한 교육용 앱은 `training` 사용 |
 | `node_version` | `20` | Node 기반 install/build/start 시 사용 |
 | `dockerfile_path` | `""` | Dockerfile 경로. 비어 있으면 루트 `Dockerfile` → `dockerfile`만 자동 탐색 (하위 경로 자동 선택 안 함) |
 | `docker_build_context` | `"."` | Docker build context. 모노레포는 caller가 명시 |

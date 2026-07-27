@@ -60,6 +60,11 @@ on:
         type: string
         required: false
         default: ""
+      gate_profile:
+        description: Policy profile to enforce (pr | post_merge | training)
+        type: string
+        required: false
+        default: "pr"
       node_version:
         description: Node.js version when install/build/start commands are used
         type: string
@@ -750,6 +755,7 @@ jobs:
         id: gate-eval
         env:
           SECURE_GATE_POLICY: ${{ steps.policy.outputs.path }}
+          SECURE_GATE_PROFILE: ${{ inputs.gate_profile }}
         run: python .secure-gate/scripts/evaluate-gate.py
         continue-on-error: true
 
@@ -772,6 +778,14 @@ jobs:
             security/reports/cve-policy-decision.json
             security/reports/ai-security-summary.json
             security/reports/ai-security-summary.md
+
+      - name: Upload CVE track evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cve-track-evidence
+          if-no-files-found: ignore
+          path: |
             security/sbom/generated/
 
       - name: Enforce Gate
