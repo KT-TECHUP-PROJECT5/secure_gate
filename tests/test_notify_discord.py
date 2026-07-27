@@ -78,6 +78,24 @@ class NotifyDiscordTests(unittest.TestCase):
         self.assertEqual(0x57F287, embed["color"])
         self.assertIn("통과", embed["description"])
 
+    def test_soft_report_link_uses_pr_comment_url(self):
+        decision = {"gate_status": "FAILED", "blocked": True, "block_reasons": ["x"]}
+        with mock.patch.dict(
+            os.environ,
+            {
+                "GITHUB_REPOSITORY": "KT-TECHUP-PROJECT5/web",
+                "GITHUB_SHA": "abcdef1",
+                "GITHUB_RUN_ID": "99",
+                "GITHUB_SERVER_URL": "https://github.com",
+                "PR_COMMENT_URL": "https://github.com/KT-TECHUP-PROJECT5/web/pull/12",
+            },
+            clear=False,
+        ):
+            payload = notify.build_message(decision, profile="soft")
+        blob = json.dumps(payload, ensure_ascii=False)
+        self.assertIn("https://github.com/KT-TECHUP-PROJECT5/web/pull/12", blob)
+        self.assertIn("결과 리포트", blob)
+
     def test_main_skips_without_webhook(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             decision_path = Path(temp_dir) / "gate-decision.json"

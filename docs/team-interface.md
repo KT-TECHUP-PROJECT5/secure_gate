@@ -178,7 +178,7 @@ Aggregator/Policy는 아래 기준선으로 진행한다.
 | AI 결과 보고서 / 수정 가이드 | 별도 담당 (`docs/AI-reference.md`)                                | 본 범위 제외             |
 | IR 플레이북                  | `docs/incident-response-playbook.md` (사람 대응/SLA)              | 반영                     |
 | ZAP XSS 탐지 고도화          | DAST 고도화로 이관                                                | 보류                     |
-| Discord 요약 알림            | Post-merge `gate-decision` 요약 webhook (`docs/discord-notification.md`) | 구현 중                  |
+| Discord 요약 알림            | Soft/Hard `gate-decision` 요약 webhook (`docs/discord-notification.md`) | 구현 중                  |
 
 ---
 

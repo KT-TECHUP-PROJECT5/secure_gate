@@ -18,7 +18,8 @@ gate-decision.json 요약을 Discord Incoming Webhook으로 전송한다.
   GITHUB_SHA            commit sha
   GITHUB_RUN_ID         Actions run id
   GITHUB_SERVER_URL     기본 https://github.com
-  AI_REPORT_URL         결과 리포트 링크 (없으면 Actions run 페이지)
+  PR_COMMENT_URL        soft 결과 리포트 링크 (PR 페이지/댓글)
+  AI_REPORT_URL         hard 결과 리포트 링크 (없으면 Actions run)
   DISCORD_FAIL_CLOSED   true면 webhook/HTTP 실패 시 exit 1
 """
 
@@ -125,7 +126,11 @@ def build_message(decision: dict, *, profile: str) -> dict:
     short_sha = sha[:7] if sha else "unknown"
     run_url = build_run_url()
     commit_url = build_commit_url(sha)
-    report_url = env("AI_REPORT_URL") or run_url
+    # soft → PR comment/page, hard → AI/artifact report (fallback: Actions run)
+    if profile == "soft":
+        report_url = env("PR_COMMENT_URL") or env("AI_REPORT_URL") or run_url
+    else:
+        report_url = env("AI_REPORT_URL") or run_url
 
     mode_label = "Hard" if profile == "hard" else "Soft"
     title = f"{mode_label} mode · {status}"
@@ -139,7 +144,7 @@ def build_message(decision: dict, *, profile: str) -> dict:
 
     commit_value = f"[`{short_sha}`]({commit_url})" if commit_url else f"`{short_sha}`"
 
-    # Run page = logs first; report link = decision/summary artifact.
+    # Run page = logs first; soft report = PR comment, hard report = result artifact/AI.
     action_link = f"[실행 로그]({run_url})" if run_url else "`실행 로그 없음`"
     report_link = (
         f"[결과 리포트]({report_url})" if report_url else "`결과 리포트 없음`"

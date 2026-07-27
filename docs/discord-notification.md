@@ -7,8 +7,13 @@ Version: 0.1.0
 
 # Discord 게이트 요약 알림
 
-Post-merge(hard) Gate 결과를 Discord Incoming Webhook으로 요약 전송한다.  
-Telegram은 범위에서 제외한다. Soft(PR)는 PR 댓글이 1차 채널이다.
+Soft(PR) / Hard(post-merge) Gate 결과를 Discord Incoming Webhook으로 요약 전송한다.  
+Telegram은 범위에서 제외한다.
+
+| 모드 | Discord | 결과 리포트 링크 |
+| --- | --- | --- |
+| Soft | PR 댓글 후 알림 | PR 페이지 (`PR_COMMENT_URL`) |
+| Hard | aggregate 후 알림 | AI/Artifact URL (`AI_REPORT_URL`, 없으면 Actions) |
 
 ## 무엇을 보내는가
 
@@ -30,8 +35,10 @@ Telegram은 범위에서 제외한다. Soft(PR)는 PR 댓글이 1차 채널이�
 - finding 전체 dump
 - 상세 보고서 본문 (링크만)
 
-결과 리포트 URL은 `AI_REPORT_URL`(repo variable)이 있으면 그걸 쓰고,
-없으면 Actions run 페이지로 안내한다.
+결과 리포트 URL:
+
+- soft: `PR_COMMENT_URL` (PR html_url) → 없으면 Actions run
+- hard: `AI_REPORT_URL`(repo variable) → 없으면 Actions run
 
 ## Caller 설정
 
