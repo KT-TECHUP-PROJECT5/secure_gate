@@ -44,7 +44,7 @@ D파트 실행기는 Reusable Workflow의 Runtime Validation Job에 연결되어
 | Smoke Test 실행 명령어 | `RUNTIME_BASE_URL=http://127.0.0.1:8000 HEALTH_CHECK_PATH=/posts HEALTH_EXPECTED_STATUS=200 SMOKE_TEST_PATHS="/login=200,/posts=200,/upload=200\|303,/docs=200,/redoc=200" python3 scripts/runtime-validation.py` |
 | PR ZAP 실행 명령어 | `python3 scripts/run-zap-validation.py --profile pr --target-url http://127.0.0.1:8000/posts` |
 | Merge 이후 ZAP 실행 명령어 | `ZAP_AUTH_USERNAME=user1 ZAP_AUTH_PASSWORD="<Secret>" python3 scripts/run-zap-validation.py --profile post-merge --target-url "${STAGING_URL}/posts" --auth-context-url "${STAGING_URL}" --auth-plan security/zap/secure-gate-auth-plan.yaml` |
-| ZAP 인증 검사 기준 | `security/zap/secure-gate-auth-plan.yaml`이 form login, cookie session, 로그인 상태 검증, 인증 User Spider와 Active Scan을 실행한다. 비밀번호는 파일이나 명령문에 저장하지 않고 Secret에서 `ZAP_AUTH_PASSWORD`로 주입한다. |
+| ZAP 인증 검사 기준 | `security/zap/secure-gate-auth-plan.yaml`이 form login, cookie session, 로그인 상태 검증, 인증 User Spider와 Active Scan을 실행한다. Spider는 `ZAP_TARGET_URL`에서 시작하고 Context는 Base URL 하위 경로를 포함하므로 루트 `/`가 404인 앱도 검사할 수 있다. 비밀번호는 파일이나 명령문에 저장하지 않고 Secret에서 `ZAP_AUTH_PASSWORD`로 주입한다. |
 | ZAP 결과 파일 경로 | `security/reports/zap-report.json` |
 | PR Nuclei 실행 명령어 | `python3 scripts/run-nuclei-validation.py --profile pr --target-url http://127.0.0.1:8000/posts --trivy-report security/reports/dependency-report.json`. PR 기본값은 `medium,high,critical`, `xss`, 전체 timeout 5분이다. |
 | Merge 이후 Nuclei 실행 명령어 | `python3 scripts/run-nuclei-validation.py --profile post-merge --target-url "${STAGING_URL}/posts" --reports-dir security/reports`. Trivy 입력 없이 태그 제한 없는 `low,medium,high,critical` Full Scan을 실행하며 전체 timeout은 30분이다. |

@@ -176,7 +176,7 @@ Aggregator/Policy와 비차단 AI 설명은 아래 기준선으로 진행한다.
 | 정책 프로필                  | `pr` / `post_merge` 동일 차단, `training` 교육용 경고 완화        | 코드 반영                |
 | 예외 승인                    | `security/policies/suppressions.json` (사유·소유자·승인자·만료일) | 코드 반영                |
 | 현재 코드                    | category + profile 기반 Block/Warn                                | 운영 준비                |
-| AI 결과 보고서               | 확정 Gate 뒤에서 요약·개선 방향 생성, 판정에는 영향 없음          | 코드 반영                |
+| AI 결과 보고서               | 확정 Gate 뒤에서 요약·개선 방향 생성, 판정에는 영향 없음          | PR/Post-merge 연결 완료  |
 | CVE 보정 트랙                | Dependency CVE를 KEV·EPSS 근거로 보정, 기본 monitor/annotateOnly  | 코드 반영                |
 | AI 참고 문서                 | `docs/AI-reference.md`                                            | 반영                     |
 | IR 플레이북                  | `docs/incident-response-playbook.md` (사람 대응/SLA)              | 반영                     |
@@ -202,3 +202,5 @@ Aggregator/Policy와 비차단 AI 설명은 아래 기준선으로 진행한다.
 | D - Runtime Validation  | `security/reports/runtime-report.json`                      |
 | A - Summary             | `security/reports/security-summary.json`                    |
 | A - Gate Decision       | `security/reports/gate-decision.json`                       |
+| AI - Structured Summary | `security/reports/ai-security-summary.json`                 |
+| AI - Readable Summary   | `security/reports/ai-security-summary.md`                   |

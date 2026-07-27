@@ -50,7 +50,7 @@ flowchart TD
     K -- Warning --> M[PR 댓글 경고]
     K -- Yes --> N[PR Check 성공 / Merge 허용]
 
-    J --> X[AI 결과 설명 생성 선택]
+    J --> X[비차단 AI 결과 설명 생성]
     J --> O[PR Comment Bot 결과 요약 댓글 작성]
     X --> O
 
@@ -59,7 +59,9 @@ flowchart TD
     Q --> R[Docker Build]
     R --> S[Staging Deploy]
     S --> T[Post-deploy Validation]
-    T --> U{배포 검증 통과?}
+    T --> Y[Post-merge Aggregator / Policy Evaluator]
+    Y --> Z[비차단 AI 결과 설명 생성]
+    Y --> U{배포 검증 통과?}
 
     U -- No --> V[Production 배포 차단 또는 Rollback]
     U -- Yes --> W[Production 배포 가능]
@@ -176,6 +178,8 @@ Gate Status: ❌ FAILED
    `CUSTOM_RUNTIME_USERNAME` Repository Variables와
    `DEPENDENCY_TRACK_URL`, `DEPENDENCY_TRACK_API_KEY`, `DYNATRACE_TOKEN`,
    `ZAP_AUTH_PASSWORD`, `CUSTOM_RUNTIME_PASSWORD` Secrets를 등록한다.
+   AI 설명 보고서를 사용하려면 `OPENAI_API_KEY` Secret도 등록한다.
+   이 Secret이 없거나 API 호출이 실패해도 Gate 판정에는 영향을 주지 않는다.
    두 entity selector는
    전체 서비스가 아닌 해당 애플리케이션으로 범위를 제한해야 한다.
 6. Branch Protection에서 Secure PR Gate Check를 Required로 설정한다.

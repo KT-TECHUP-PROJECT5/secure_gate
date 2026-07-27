@@ -98,6 +98,7 @@ def infer_category(finding: dict) -> str:
         plugin_id = finding_id.rsplit(".", 1)[-1]
         if plugin_id in ZAP_MISCONFIG_PLUGIN_IDS:
             return "misconfig"
+        return "vuln"
 
     if any(keyword in blob for keyword in MISCONFIG_KEYWORDS):
         return "misconfig"

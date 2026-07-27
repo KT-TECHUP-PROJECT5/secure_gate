@@ -178,6 +178,7 @@ jobs:
 | `DYNATRACE_TOKEN` | Post-merge 필수 | Post-merge Reusable Workflow에서 Problems와 Service entities 조회 |
 | `ZAP_AUTH_PASSWORD` | 인증 ZAP 사용 시 필수 | ZAP Automation Framework 테스트 계정 비밀번호 |
 | `CUSTOM_RUNTIME_PASSWORD` | 인증 Custom Check 사용 시 필수 | Admin/IDOR 검사 테스트 계정 비밀번호 |
+| `OPENAI_API_KEY` | 선택 | Gate 판정 이후 비차단 AI 설명 보고서 생성. 미등록·API 실패 시 `skipped`/`failed` 보고서만 생성 |
 
 PR에서는 Dependency-Track 업로드를 생략한다. Post-merge에서는 URL/API Key와
 SBOM 업로드 성공을 필수로 요구하며 실패 또는 skip 시 Gate를 차단한다.
@@ -327,6 +328,8 @@ security/reports/
   runtime-report.json       # Runtime Validation 결과 (D파트)
   security-summary.json     # Aggregator 통합 결과
   gate-decision.json        # Gate Evaluator 판단 결과
+  ai-security-summary.json  # AI 설명 구조화 결과 (비차단)
+  ai-security-summary.md    # 사람이 읽는 AI 설명 보고서 (비차단)
 ```
 
 ---

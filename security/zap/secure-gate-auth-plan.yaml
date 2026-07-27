@@ -3,7 +3,9 @@ env:
   contexts:
     - name: secure-gate-authenticated
       urls:
-        - ${ZAP_CONTEXT_URL}
+        - ${ZAP_TARGET_URL}
+      includePaths:
+        - ${ZAP_CONTEXT_URL}/.*
       excludePaths:
         - ${ZAP_CONTEXT_URL}/logout.*
       authentication:

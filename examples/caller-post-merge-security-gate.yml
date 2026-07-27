@@ -43,3 +43,4 @@ jobs:
       DYNATRACE_TOKEN: ${{ secrets.DYNATRACE_TOKEN }}
       ZAP_AUTH_PASSWORD: ${{ secrets.ZAP_AUTH_PASSWORD }}
       CUSTOM_RUNTIME_PASSWORD: ${{ secrets.CUSTOM_RUNTIME_PASSWORD }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

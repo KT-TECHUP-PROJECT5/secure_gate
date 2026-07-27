@@ -151,30 +151,31 @@ python3 scripts/evaluate-gate.py
 이 설정은 취약점을 안전하다고 판단하는 것이 아니다. 고의로 취약한 테스트 앱에서
 탐지 결과와 Merge 이후 단계를 끝까지 검증하기 위한 실행 모드다.
 
-## 7. A파트 Workflow 연결 계약
+## 7. Workflow 연결
 
-Workflow 파일은 이 변경에서 수정하지 않는다. A파트는 다음 연결만 추가한다.
-
-1. PR/Post-merge reusable workflow에 `policy_profile` 입력 추가
-2. 기본값은 각각 `pr`, `post_merge`
-3. 교육용 호출자만 `training` 전달
-4. Evaluator 실행 환경변수로 `SECURE_GATE_PROFILE` 전달
-5. Gate Evaluator 뒤에서 AI 스크립트 실행
-6. `OPENAI_API_KEY`는 GitHub Secret으로 전달
-7. AI JSON/Markdown을 Artifact와 PR 댓글 단계에 전달
-
-개념적인 실행 순서는 다음과 같다.
+PR과 Post-merge reusable workflow는 Gate Evaluator 뒤에서 AI 스크립트를
+실행한다. 호출 저장소는 선택 Secret `OPENAI_API_KEY`만 전달하면 된다.
 
 ```yaml
-- name: Generate AI security explanation
+- name: Generate AI security summary
+  if: always()
   env:
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-    OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
   run: python3 .secure-gate/scripts/generate-ai-security-summary.py
 ```
 
-Fork PR처럼 Secret을 사용할 수 없는 실행에서는 AI가 `skipped`가 되지만,
-기존 Gate 검사는 그대로 동작한다.
+생성 파일:
+
+- `security/reports/ai-security-summary.json`
+- `security/reports/ai-security-summary.md`
+
+두 파일은 PR의 `gate-decision` Artifact와 Post-merge의
+`post-merge-gate-results` Artifact에 포함된다. PR 댓글 생성기는 같은
+Artifact의 AI JSON을 읽어 요약과 우선 개선 방향을 표시한다.
+
+Fork PR처럼 Secret을 사용할 수 없는 실행에서는 AI 상태가 `skipped`가 된다.
+API 오류나 할당량 오류는 `failed`로 기록하지만 기존 Gate 검사는 그대로
+동작하고 `gate-decision.json`을 변경하지 않는다.
 
 ## 8. 운영 원칙
 

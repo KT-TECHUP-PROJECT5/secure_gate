@@ -255,10 +255,12 @@ Fail Closed 최소선은 유지한다.
 - Gate: `FAILED`
 - 이유: 기술 실패 (Fail Closed)
 
-## 11. 비차단 AI 설명 / 보류
+## 11. 비차단 AI 설명
 
 - AI는 `gate-decision.json`의 확정 결과를 요약하고 개선 방향을 제안한다.
 - AI API 실패나 미설정은 Gate 상태를 변경하지 않는다.
+- PR과 Post-merge Workflow 모두 AI JSON/Markdown을 Gate Artifact에 포함한다.
+- PR 댓글은 AI JSON의 상태가 `succeeded`일 때 요약과 우선 개선 방향을 표시한다.
 - 자동 코드 수정은 범위에서 제외한다.
 - ZAP 탐지 고도화(예: Reflected/Stored XSS 커버리지): DAST 고도화 항목으로 별도 진행
 - Discord / Telegram 요약 알림: 정책 확정 후 Gate 요약 연동으로 진행 가능

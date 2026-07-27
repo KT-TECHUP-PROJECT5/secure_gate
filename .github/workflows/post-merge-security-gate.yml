@@ -129,6 +129,9 @@ on:
       CUSTOM_RUNTIME_PASSWORD:
         description: Password for authenticated custom runtime checks
         required: false
+      OPENAI_API_KEY:
+        description: Optional OpenAI API key for the non-authoritative AI report
+        required: false
 
 jobs:
   post-merge-dependency:
@@ -179,9 +182,11 @@ jobs:
           if [ -n "$DOCKERFILE" ]; then
             MODE="image"
           fi
-          echo "dockerfile=$DOCKERFILE" >> "$GITHUB_OUTPUT"
-          echo "context=$BUILD_CONTEXT" >> "$GITHUB_OUTPUT"
-          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          {
+            echo "dockerfile=$DOCKERFILE"
+            echo "context=$BUILD_CONTEXT"
+            echo "mode=$MODE"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build image for Trivy
         if: steps.resolve-dockerfile.outputs.mode == 'image'
@@ -571,6 +576,14 @@ jobs:
           SECURE_GATE_POLICY: ${{ steps.policy.outputs.path }}
         run: python3 .secure-gate/scripts/evaluate-gate.py
 
+      - name: Generate post-merge AI security summary
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 3
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: python3 .secure-gate/scripts/generate-ai-security-summary.py
+
       - name: Upload post-merge gate results
         if: always()
         uses: actions/upload-artifact@v4
@@ -584,5 +597,7 @@ jobs:
             security/reports/security-summary.json
             security/reports/gate-decision.json
             security/reports/cve-policy-decision.json
+            security/reports/ai-security-summary.json
+            security/reports/ai-security-summary.md
             security/sbom/generated/
           if-no-files-found: warn

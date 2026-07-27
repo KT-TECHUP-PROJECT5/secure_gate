@@ -97,6 +97,9 @@ on:
       DEPENDENCY_TRACK_API_KEY:
         description: Dependency-Track API Key for BOM upload
         required: false
+      OPENAI_API_KEY:
+        description: Optional OpenAI API key for the non-authoritative AI report
+        required: false
 
 jobs:
   # ──────────────────────────────────────────
@@ -268,9 +271,11 @@ jobs:
             MODE="fs"
           fi
 
-          echo "dockerfile=${DOCKERFILE}" >> "$GITHUB_OUTPUT"
-          echo "context=${CONTEXT}" >> "$GITHUB_OUTPUT"
-          echo "mode=${MODE}" >> "$GITHUB_OUTPUT"
+          {
+            echo "dockerfile=${DOCKERFILE}"
+            echo "context=${CONTEXT}"
+            echo "mode=${MODE}"
+          } >> "$GITHUB_OUTPUT"
           echo "Resolved Dockerfile: '${DOCKERFILE:-<none>}'"
           echo "Docker build context: '${CONTEXT}'"
           echo "Trivy scan mode: ${MODE}"
@@ -745,6 +750,14 @@ jobs:
         run: python .secure-gate/scripts/evaluate-gate.py
         continue-on-error: true
 
+      - name: Generate AI security summary
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 3
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: python3 .secure-gate/scripts/generate-ai-security-summary.py
+
       - name: Upload gate results
         uses: actions/upload-artifact@v4
         if: always()
@@ -754,6 +767,8 @@ jobs:
             security/reports/security-summary.json
             security/reports/gate-decision.json
             security/reports/cve-policy-decision.json
+            security/reports/ai-security-summary.json
+            security/reports/ai-security-summary.md
             security/sbom/generated/
 
       - name: Enforce Gate
