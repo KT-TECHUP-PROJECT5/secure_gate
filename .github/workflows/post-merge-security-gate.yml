@@ -589,6 +589,15 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: python3 .secure-gate/scripts/generate-ai-security-summary.py
 
+      - name: Upload standalone AI security summary
+        id: upload-ai-summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-security-summary
+          path: security/reports/ai-security-summary.md
+          if-no-files-found: warn
+
       - name: Upload post-merge gate results
         if: always()
         uses: actions/upload-artifact@v4
@@ -613,8 +622,8 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           GATE_DECISION_FILE: security/reports/gate-decision.json
           NOTIFY_PROFILE: hard
-          # Optional dedicated AI report URL; falls back to Actions run page.
-          AI_REPORT_URL: ${{ vars.AI_REPORT_URL }}
+          # The upload step returns this run's authenticated Artifact download URL.
+          AI_REPORT_URL: ${{ steps.upload-ai-summary.outputs.artifact-url }}
         run: python3 .secure-gate/scripts/notify-discord.py
         continue-on-error: true
 
