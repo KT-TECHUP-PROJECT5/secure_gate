@@ -266,7 +266,8 @@ Fail Closed 최소선은 유지한다.
 - E 파트 자동 수정 가이드 생성: 계획에서 제외  
   다른 담당자가 AI 결과 보고서를 별도로 구성한다.
 - ZAP 탐지 고도화(예: Reflected/Stored XSS 커버리지): DAST 고도화 항목으로 별도 진행
-- Discord / Telegram 요약 알림: 정책 확정 후 Gate 요약 연동으로 진행 가능
+- Discord 요약 알림: Post-merge hard gate 요약 webhook (`docs/discord-notification.md`)
+- Telegram 알림: 범위 제외 (Discord 한정)
 
 ## 12. 고도화 순서
 
@@ -288,8 +289,9 @@ Fail Closed 최소선은 유지한다.
 
 ### 4단계: 운영 알림
 
-- `gate-decision.json` 요약본을 Discord / Telegram으로 전송
+- `gate-decision.json` 요약본을 Discord webhook으로 전송 (hard gate)
 - Secret 원문과 과도한 finding dump는 알림에 포함하지 않음
+- Soft gate는 PR 댓글이 1차 채널
 
 ### 5단계: 품질 강화
 

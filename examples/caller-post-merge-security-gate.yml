@@ -33,3 +33,5 @@ jobs:
       DEPENDENCY_TRACK_URL: ${{ secrets.DEPENDENCY_TRACK_URL }}
       DEPENDENCY_TRACK_API_KEY: ${{ secrets.DEPENDENCY_TRACK_API_KEY }}
       DYNATRACE_TOKEN: ${{ secrets.DYNATRACE_TOKEN }}
+      # Optional: hard-gate summary to Discord (skip if unset)
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}

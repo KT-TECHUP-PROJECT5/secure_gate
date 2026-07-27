@@ -88,6 +88,9 @@ on:
       DYNATRACE_TOKEN:
         description: Dynatrace token with problems.read and entities.read
         required: true
+      DISCORD_WEBHOOK_URL:
+        description: Discord incoming webhook URL for hard-gate summary (optional)
+        required: false
 
 jobs:
   post-merge-dependency:
@@ -440,9 +443,11 @@ jobs:
           fi
 
       - name: Evaluate post-merge policy
+        id: gate-eval
         env:
           SECURE_GATE_POLICY: ${{ steps.policy.outputs.path }}
         run: python3 .secure-gate/scripts/evaluate-gate.py
+        continue-on-error: true
 
       - name: Upload post-merge gate results
         if: always()
@@ -459,3 +464,20 @@ jobs:
             security/reports/cve-policy-decision.json
             security/sbom/generated/
           if-no-files-found: warn
+
+      - name: Notify Discord (summary)
+        if: always()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          GATE_DECISION_FILE: security/reports/gate-decision.json
+          NOTIFY_PROFILE: hard
+          # Optional dedicated AI report URL; falls back to Actions run page.
+          AI_REPORT_URL: ${{ vars.AI_REPORT_URL }}
+        run: python3 .secure-gate/scripts/notify-discord.py
+        continue-on-error: true
+
+      - name: Enforce post-merge gate
+        if: steps.gate-eval.outcome == 'failure'
+        run: |
+          echo "Post-merge Security Gate FAILED."
+          exit 1
