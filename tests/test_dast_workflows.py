@@ -110,6 +110,22 @@ class DastWorkflowTests(unittest.TestCase):
                     workflow,
                 )
 
+    def test_callers_pass_optional_discord_secret(self):
+        caller_files = (
+            ".github/workflows/call-pr-security-gate.yml",
+            ".github/workflows/cd-staging.yml",
+            "examples/caller-security-gate.yml",
+            "examples/caller-post-merge-security-gate.yml",
+        )
+
+        for caller_file in caller_files:
+            with self.subTest(caller_file=caller_file):
+                workflow = read_text(caller_file)
+                self.assertIn(
+                    "DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}",
+                    workflow,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
