@@ -592,6 +592,16 @@ def normalize_prioritized_findings(analysis, source_payload):
             candidates = findings_by_id.get(finding_id, [])
             if len(candidates) == 1:
                 source_finding = candidates[0]
+            elif candidates and len(
+                {candidate["remediation_group"] for candidate in candidates}
+            ) == 1:
+                source_finding = min(
+                    candidates,
+                    key=lambda candidate: (
+                        candidate["location"],
+                        candidate["report"],
+                    ),
+                )
             else:
                 rejected += 1
                 continue

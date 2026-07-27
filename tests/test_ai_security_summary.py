@@ -226,6 +226,67 @@ class AiSecuritySummaryTests(unittest.TestCase):
         self.assertEqual([], normalized["prioritized_findings"])
         self.assertIn("입력에 없는 finding", normalized["limitations"][0])
 
+    def test_repeated_real_finding_id_uses_actual_input_representative(self):
+        decision = {
+            "gate_status": "PASSED",
+            "blocked": False,
+            "policy_profile": "pr",
+            "reports": {
+                "sast": {
+                    "status": "warning",
+                    "findings": [
+                        {
+                            "id": "semgrep.repeated-rule",
+                            "severity": "medium",
+                            "category": "vuln",
+                            "title": "Repeated Semgrep rule",
+                            "description": "The same rule matched multiple locations.",
+                            "location": "app/a.py:10",
+                        },
+                        {
+                            "id": "semgrep.repeated-rule",
+                            "severity": "medium",
+                            "category": "vuln",
+                            "title": "Repeated Semgrep rule",
+                            "description": "The same rule matched multiple locations.",
+                            "location": "app/b.py:20",
+                        },
+                    ],
+                }
+            },
+        }
+        source = ai_summary.build_source_payload(decision, max_findings=10)
+        analysis = {
+            "executive_summary": "요약",
+            "key_observations": [],
+            "prioritized_findings": [
+                {
+                    "finding_id": "semgrep.repeated-rule",
+                    "location": "대표 위치",
+                    "risk": "반복 탐지 위험",
+                    "remediation": "동일 규칙 탐지 위치를 함께 수정합니다.",
+                }
+            ],
+            "report_reading_guide": [],
+            "limitations": [],
+        }
+
+        normalized = ai_summary.normalize_prioritized_findings(analysis, source)
+
+        self.assertEqual(1, len(normalized["prioritized_findings"]))
+        priority = normalized["prioritized_findings"][0]
+        self.assertEqual("app/a.py:10", priority["location"])
+        self.assertEqual(
+            ["app/a.py:10", "app/b.py:20"],
+            priority["source_locations"],
+        )
+        self.assertFalse(
+            any(
+                "입력에 없는 finding" in limitation
+                for limitation in normalized["limitations"]
+            )
+        )
+
     def test_priorities_are_grouped_deduplicated_and_action_ordered(self):
         decision = {
             "gate_status": "FAILED",
